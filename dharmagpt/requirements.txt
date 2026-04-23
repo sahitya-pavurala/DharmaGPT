@@ -4,6 +4,16 @@ pydantic==2.8.2
 pydantic-settings==2.4.0
 python-dotenv==1.0.1
 httpx==0.27.2
+torch==2.11.0
+transformers==5.6.1
+sentencepiece==0.2.1
+mosestokenizer==1.2.1
+nltk==3.9.4
+sacremoses==0.1.1
+accelerate==1.13.0
+indic-nlp-library==0.92
+regex==2026.4.4
+mock==5.2.0
 
 # LLM + Embeddings
 anthropic==0.34.0
@@ -15,17 +25,18 @@ pinecone==5.0.0
 # Audio
 requests==2.32.3
 python-multipart==0.0.9
+imageio-ffmpeg==0.6.0
 
-# Scraping
+# Scraping + corpus
 beautifulsoup4==4.12.3
 lxml==5.3.0
+tqdm==4.66.5
 
 # Utils
-tqdm==4.66.5
 tenacity==9.0.0
 structlog==24.4.0
+filelock==3.29.0
 
 # Dev
 pytest==8.3.3
 pytest-asyncio==0.24.0
-httpx==0.27.2

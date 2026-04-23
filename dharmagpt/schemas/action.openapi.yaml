@@ -1,0 +1,242 @@
+openapi: 3.1.0
+info:
+  title: DharmaGPT API
+  description: >
+    Grounded answers and source retrieval from Hindu sacred texts —
+    Valmiki Ramayana, Mahabharata, Bhagavad Gita, principal Upanishads,
+    and major Puranas. Every answer includes citations.
+  version: 1.0.0
+
+servers:
+  - url: https://api.dharmagpt.com/v1
+    description: Production
+
+paths:
+  /answer:
+    post:
+      operationId: getDharmaAnswer
+      summary: Get a grounded answer from sacred texts
+      description: >
+        Returns a grounded answer to a dharma question, along with citations
+        from the retrieved source passages. Use this for all domain questions
+        about Hindu scripture, ethics, stories, philosophy, and practice.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerRequest'
+      responses:
+        '200':
+          description: Grounded answer with source citations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerResponse'
+        '422':
+          description: Validation error (query too short/long, unknown mode)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+
+  /search:
+    post:
+      operationId: searchDharmaPassages
+      summary: Search sacred text passages directly
+      description: >
+        Returns raw retrieved passages from the corpus matching the query.
+        Useful for source exploration, citation lookup, or debugging retrieval.
+        Does NOT generate an answer — returns passages only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: List of matching passages with scores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '422':
+          description: Validation error
+
+components:
+  schemas:
+
+    QueryMode:
+      type: string
+      enum:
+        - guidance
+        - story
+        - children
+        - scholar
+      description: >
+        Response tone and format.
+        - guidance: Wise elder answering a life question through dharmic lens (default)
+        - story: Literary retelling of a scripture episode
+        - children: Age-appropriate story for children 5–12
+        - scholar: Precise scholarly response with Sanskrit terms and verse citations
+
+    AnswerRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 3
+          maxLength: 1000
+          description: >
+            The user's question. Can be in English, Telugu, Hindi, or Sanskrit.
+            Examples: "What does Rama do when Sita is taken?",
+            "What is nishkama karma?", "How does Hanuman find Sita?"
+        mode:
+          $ref: '#/components/schemas/QueryMode'
+          default: guidance
+        language:
+          type: string
+          default: en
+          description: >
+            Preferred response language: "en" (English), "te" (Telugu), "hi" (Hindi).
+            Transliterated Telugu/Sanskrit always provided alongside.
+        filter_kanda:
+          type: string
+          nullable: true
+          description: >
+            Optionally restrict retrieval to a specific kanda/parva.
+            Examples: "Sundara Kanda", "Bhishma Parva", "Aranya Kanda",
+            "Uttara Kanda", "Yuddha Kanda", "Bala Kanda"
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          maxItems: 10
+          default: []
+          description: >
+            Previous turns in this conversation for multi-turn context.
+            Include last 3–5 turns for best results.
+
+    AnswerResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+          description: Grounded answer with inline citations.
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourcePassage'
+          description: Retrieved passages that grounded the answer.
+        mode:
+          $ref: '#/components/schemas/QueryMode'
+        language:
+          type: string
+        query_id:
+          type: string
+          description: UUID for this query (use in /sources/{id} for future expansion)
+
+    SearchRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 3
+          maxLength: 500
+        top_k:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 20
+          description: Number of passages to return.
+        filter_kanda:
+          type: string
+          nullable: true
+        filter_source_type:
+          type: string
+          nullable: true
+          enum:
+            - text
+            - commentary
+            - audio_transcript
+
+    SearchResponse:
+      type: object
+      properties:
+        passages:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourcePassage'
+        query:
+          type: string
+
+    SourcePassage:
+      type: object
+      properties:
+        text:
+          type: string
+          description: The passage text (up to 500 chars preview).
+        citation:
+          type: string
+          description: Human-readable citation, e.g. "Valmiki Ramayana, Sundara Kanda, Sarga 15"
+        kanda:
+          type: string
+          nullable: true
+        sarga:
+          type: integer
+          nullable: true
+        score:
+          type: number
+          format: float
+          description: Retrieval relevance score (0–1). Above 0.35 is meaningful.
+        source_type:
+          type: string
+          enum:
+            - text
+            - commentary
+            - audio_transcript
+        audio_timestamp:
+          type: string
+          nullable: true
+          description: Timestamp range if source is audio, e.g. "123s–187s"
+        url:
+          type: string
+          nullable: true
+          description: Link to source online (e.g. valmikiramayan.net)
+
+    ChatMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+        content:
+          type: string
+          maxLength: 2000
+
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+security:
+  - ApiKeyAuth: []

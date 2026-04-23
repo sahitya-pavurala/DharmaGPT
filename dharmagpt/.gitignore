@@ -1,0 +1,59 @@
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# ── Audio files (large, binary — store in cloud not git) ──────────────────────
+knowledge/raw/*.mp3
+knowledge/raw/*.wav
+knowledge/raw/*.m4a
+knowledge/raw/*.aac
+knowledge/raw/*.ogg
+knowledge/raw/*.flac
+knowledge/raw/*.opus
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.pytest_cache
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Notebooks (keep .ipynb but not checkpoints) ───────────────────────────────
+.ipynb_checkpoints/
+
+# ── Pinecone / vector cache ───────────────────────────────────────────────────
+*.faiss
+*.pkl
+
+# ── Large data files (commit schema + seed only) ─────────────────────────────
+knowledge/processed/audio_*.jsonl

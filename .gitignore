@@ -18,6 +18,7 @@ build/
 data/raw/
 data/chunks/
 data/audio/
+downloads/
 scripts/scraper/
 *.jsonl
 *.transcript.json

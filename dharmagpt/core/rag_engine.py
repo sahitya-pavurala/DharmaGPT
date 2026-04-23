@@ -1,9 +1,9 @@
 import uuid
 import structlog
-import anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from core.config import get_settings
+from core.llm import LLMBackend, LLMConfig, generate_text_async
 from core.retrieval import retrieve, format_context
 from core.prompts import get_system_prompt
 from models.schemas import QueryRequest, QueryResponse, SourceChunk
@@ -11,26 +11,19 @@ from models.schemas import QueryRequest, QueryResponse, SourceChunk
 log = structlog.get_logger()
 settings = get_settings()
 
-_anthropic: anthropic.AsyncAnthropic | None = None
-
-
-def get_anthropic() -> anthropic.AsyncAnthropic:
-    global _anthropic
-    if _anthropic is None:
-        _anthropic = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    return _anthropic
-
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 async def _call_llm(system: str, messages: list[dict]) -> str:
-    client = get_anthropic()
-    response = await client.messages.create(
-        model=settings.anthropic_model,
-        max_tokens=1024,
-        system=system,
-        messages=messages,
+    backend = LLMBackend((settings.llm_backend or "anthropic").lower())
+    llm_config = LLMConfig(
+        backend=backend,
+        model=settings.resolved_llm_model,
+        api_key=settings.llm_api_key
+        or (settings.anthropic_api_key if backend == LLMBackend.anthropic else settings.openai_api_key),
+        base_url=settings.llm_base_url,
+        timeout_sec=settings.llm_timeout_sec,
     )
-    return response.content[0].text
+    return await generate_text_async(system, messages, llm_config)
 
 
 async def answer(request: QueryRequest) -> QueryResponse:

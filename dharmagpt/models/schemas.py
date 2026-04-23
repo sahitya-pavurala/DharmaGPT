@@ -54,6 +54,59 @@ class AudioTranscribeResponse(BaseModel):
     file_name: str
 
 
+class ManualTranslationItem(BaseModel):
+    chunk_index: int = Field(..., ge=0)
+    text_en_manual: str = Field(..., min_length=1)
+    review_status: str = "pending"
+
+
+class ManualTranslationSingleRequest(BaseModel):
+    dataset_id: str = Field(..., min_length=1)
+    chunk_index: int = Field(..., ge=0)
+    text_en_manual: str = Field(..., min_length=1)
+    reviewer: Optional[str] = None
+    review_status: str = "pending"
+    review_note: Optional[str] = None
+
+
+class ManualTranslationBulkRequest(BaseModel):
+    dataset_id: str = Field(..., min_length=1)
+    translations: list[ManualTranslationItem] = Field(default_factory=list)
+
+
+class ManualTranslationReviewRequest(BaseModel):
+    dataset_id: str = Field(..., min_length=1)
+    chunk_index: int = Field(..., ge=0)
+    review_status: str = Field(..., pattern="^(approved|rejected|needs_work)$")
+    reviewer: Optional[str] = None
+    review_note: Optional[str] = None
+
+
+class ManualTranslationApplyResponse(BaseModel):
+    status: str
+    dataset_id: str
+    file_path: str
+    updated_chunks: int
+    total_chunks: int
+
+
+class ManualTranslationRecord(BaseModel):
+    chunk_index: int
+    text_te: Optional[str] = None
+    text_en_model: Optional[str] = None
+    text_en_manual: Optional[str] = None
+    review_status: Optional[str] = None
+    reviewer: Optional[str] = None
+    review_note: Optional[str] = None
+    reviewed_at: Optional[str] = None
+
+
+class ManualTranslationPendingResponse(BaseModel):
+    dataset_id: str
+    total_chunks: int
+    pending_chunks: list[ManualTranslationRecord]
+
+
 class HealthResponse(BaseModel):
     status: str
     pinecone: bool

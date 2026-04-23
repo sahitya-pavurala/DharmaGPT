@@ -1,0 +1,240 @@
+{
+  "version": "1.0",
+  "description": "25 benchmark queries for DharmaGPT retrieval and answer quality evaluation",
+  "categories": ["retrieval_factual", "retrieval_conceptual", "retrieval_character", "retrieval_story", "retrieval_telugu"],
+  "queries": [
+    {
+      "id": "q001",
+      "category": "retrieval_factual",
+      "query": "How does Hanuman find Sita in Lanka?",
+      "expected_sources": ["valmiki_ramayana_sundara_0015", "valmiki_ramayana_sundara_0035"],
+      "expected_kanda": "Sundara Kanda",
+      "expected_concepts": ["Ashoka grove", "Hanuman approaches Sita", "rakshasis"],
+      "ground_truth_citation": "Valmiki Ramayana, Sundara Kanda, Sarga 15–35"
+    },
+    {
+      "id": "q002",
+      "category": "retrieval_factual",
+      "query": "What is the teaching of nishkama karma in the Bhagavad Gita?",
+      "expected_sources": ["bhagavad_gita_02_047"],
+      "expected_kanda": "Bhishma Parva",
+      "expected_concepts": ["detachment from results", "right to action not fruits", "duty"],
+      "ground_truth_citation": "Bhagavad Gita, Chapter 2, Verse 47"
+    },
+    {
+      "id": "q003",
+      "category": "retrieval_factual",
+      "query": "When does Krishna say he will take birth in every age?",
+      "expected_sources": ["bhagavad_gita_04_007"],
+      "expected_kanda": "Bhishma Parva",
+      "expected_concepts": ["avatar", "yuge yuge sambhavami", "dharma restoration"],
+      "ground_truth_citation": "Bhagavad Gita, Chapter 4, Verses 7–8"
+    },
+    {
+      "id": "q004",
+      "category": "retrieval_factual",
+      "query": "How does Bhishma fall in the Kurukshetra war?",
+      "expected_sources": ["mahabharata_bhishma_parva_bhishma_fall"],
+      "expected_kanda": "Bhishma Parva",
+      "expected_concepts": ["Shikhandi", "arrow bed", "tenth day", "iccha mrityu"],
+      "ground_truth_citation": "Mahabharata, Bhishma Parva, Chapter 117"
+    },
+    {
+      "id": "q005",
+      "category": "retrieval_factual",
+      "query": "What does Yudhishthira say is the greatest wonder in the world?",
+      "expected_sources": ["mahabharata_adi_parva_dharma_yaksha"],
+      "expected_kanda": "Vana Parva",
+      "expected_concepts": ["Yaksha Prashna", "death", "people believe they will live forever"],
+      "ground_truth_citation": "Mahabharata, Vana Parva, Chapter 313"
+    },
+    {
+      "id": "q006",
+      "category": "retrieval_conceptual",
+      "query": "What does the Bhagavad Gita say about the immortality of the soul?",
+      "expected_sources": ["bhagavad_gita_02_020"],
+      "expected_kanda": "Bhishma Parva",
+      "expected_concepts": ["atman", "na jayate mriyate", "unborn eternal"],
+      "ground_truth_citation": "Bhagavad Gita, Chapter 2, Verse 20"
+    },
+    {
+      "id": "q007",
+      "category": "retrieval_conceptual",
+      "query": "What is sharanagati or surrender according to the Gita?",
+      "expected_sources": ["bhagavad_gita_18_066"],
+      "expected_kanda": "Bhishma Parva",
+      "expected_concepts": ["sarvadharmaan parityajya", "prapatti", "liberation", "charama shloka"],
+      "ground_truth_citation": "Bhagavad Gita, Chapter 18, Verse 66"
+    },
+    {
+      "id": "q008",
+      "category": "retrieval_conceptual",
+      "query": "How does the Katha Upanishad describe the Self (Atman)?",
+      "expected_sources": ["katha_upanishad_01_002_019"],
+      "expected_kanda": null,
+      "expected_concepts": ["anor aniyan", "subtler than subtle", "heart", "grace"],
+      "ground_truth_citation": "Katha Upanishad, Valli 1, Verse 20"
+    },
+    {
+      "id": "q009",
+      "category": "retrieval_conceptual",
+      "query": "What is the Vedantic teaching on non-attachment and divine pervasion in the Isha Upanishad?",
+      "expected_sources": ["isha_upanishad_001_001"],
+      "expected_kanda": null,
+      "expected_concepts": ["isavasyam idam sarvam", "renunciation", "covetousness", "divine pervasion"],
+      "ground_truth_citation": "Isha Upanishad, Verse 1"
+    },
+    {
+      "id": "q010",
+      "category": "retrieval_conceptual",
+      "query": "What is the highest dharma according to Bhishma?",
+      "expected_sources": ["mahabharata_shanti_parva_dharma_001"],
+      "expected_kanda": "Shanti Parva",
+      "expected_concepts": ["ahimsa paramo dharma", "rajadharma", "protect people", "dharma is subtle"],
+      "ground_truth_citation": "Mahabharata, Shanti Parva, Chapter 109"
+    },
+    {
+      "id": "q011",
+      "category": "retrieval_story",
+      "query": "Tell me the story of Hanuman's first meeting with Rama",
+      "expected_sources": ["valmiki_ramayana_kishkindha_0001"],
+      "expected_kanda": "Kishkindha Kanda",
+      "expected_concepts": ["Rishyamuka", "Hanuman as brahmin", "perfect speech", "Sugriva"],
+      "ground_truth_citation": "Valmiki Ramayana, Kishkindha Kanda, Sarga 3"
+    },
+    {
+      "id": "q012",
+      "category": "retrieval_story",
+      "query": "How does the Ramayana begin? Who is Rama according to Narada?",
+      "expected_sources": ["valmiki_ramayana_bala_0001"],
+      "expected_kanda": "Bala Kanda",
+      "expected_concepts": ["Valmiki's question", "ideal man", "Narada's answer", "Ikshvaku"],
+      "ground_truth_citation": "Valmiki Ramayana, Bala Kanda, Sarga 1"
+    },
+    {
+      "id": "q013",
+      "category": "retrieval_story",
+      "query": "How did Sita get abducted? What was the role of the golden deer?",
+      "expected_sources": ["valmiki_ramayana_aranya_0037"],
+      "expected_kanda": "Aranya Kanda",
+      "expected_concepts": ["golden deer", "Maricha", "Sita's longing", "Lakshmana's warning", "illusion"],
+      "ground_truth_citation": "Valmiki Ramayana, Aranya Kanda, Sarga 43"
+    },
+    {
+      "id": "q014",
+      "category": "retrieval_story",
+      "query": "What happens when Hanuman enters Lanka? How did he decide to enter?",
+      "expected_sources": ["valmiki_ramayana_sundara_0001"],
+      "expected_kanda": "Sundara Kanda",
+      "expected_concepts": ["Lanka", "small form", "unseen entry", "mission of Rama"],
+      "ground_truth_citation": "Valmiki Ramayana, Sundara Kanda, Sarga 2"
+    },
+    {
+      "id": "q015",
+      "category": "retrieval_story",
+      "query": "What does Rama do after killing Ravana? What happened to Sita?",
+      "expected_sources": ["valmiki_ramayana_yuddha_0114"],
+      "expected_kanda": "Yuddha Kanda",
+      "expected_concepts": ["Vibhishana crowned", "Pushpaka Vimana", "return to Ayodhya", "last rites"],
+      "ground_truth_citation": "Valmiki Ramayana, Yuddha Kanda, Sarga 114"
+    },
+    {
+      "id": "q016",
+      "category": "retrieval_conceptual",
+      "query": "What does the Bhagavata Purana say is the purpose of human life?",
+      "expected_sources": ["bhagavata_purana_11_002_055"],
+      "expected_kanda": "Skandha 11",
+      "expected_concepts": ["seva", "service", "life wealth intelligence speech", "highest good"],
+      "ground_truth_citation": "Bhagavata Purana, Skandha 11, Chapter 2, Verse 55"
+    },
+    {
+      "id": "q017",
+      "category": "retrieval_conceptual",
+      "query": "How does the Gita say we should deal with the mind and make the self our friend?",
+      "expected_sources": ["bhagavad_gita_06_005"],
+      "expected_kanda": "Bhishma Parva",
+      "expected_concepts": ["uddharetd atmanam", "self as friend", "self as enemy", "self-discipline"],
+      "ground_truth_citation": "Bhagavad Gita, Chapter 6, Verse 5"
+    },
+    {
+      "id": "q018",
+      "category": "retrieval_conceptual",
+      "query": "Arise, awake, stop not till the goal is reached — which Upanishad says this?",
+      "expected_sources": ["katha_upanishad_01_003_014"],
+      "expected_kanda": null,
+      "expected_concepts": ["uttishthata jagrata", "razor's edge path", "wise say", "Katha Upanishad"],
+      "ground_truth_citation": "Katha Upanishad, Valli 3, Verse 14"
+    },
+    {
+      "id": "q019",
+      "category": "retrieval_conceptual",
+      "query": "What does Brahma pray to Krishna in the Bhagavata Purana about suffering?",
+      "expected_sources": ["bhagavata_purana_10_014_008"],
+      "expected_kanda": "Skandha 10",
+      "expected_concepts": ["suffering as grace", "enduring hardship", "grace of God", "liberation"],
+      "ground_truth_citation": "Bhagavata Purana, Skandha 10, Chapter 14, Verse 8"
+    },
+    {
+      "id": "q020",
+      "category": "retrieval_character",
+      "query": "Who is Hanuman and what is his dharma?",
+      "expected_sources": ["valmiki_ramayana_sundara_0035", "valmiki_ramayana_kishkindha_0001"],
+      "expected_kanda": "Sundara Kanda",
+      "expected_concepts": ["devotion", "Rama's servant", "strength", "wisdom", "brahmacharya"],
+      "ground_truth_citation": "Valmiki Ramayana, multiple kandas"
+    },
+    {
+      "id": "q021",
+      "category": "retrieval_character",
+      "query": "How does Sita show patience and virtue during her captivity?",
+      "expected_sources": ["valmiki_ramayana_sundara_0034"],
+      "expected_kanda": "Sundara Kanda",
+      "expected_concepts": ["Ashoka grove", "patient as the earth", "grief", "virtue undiminished"],
+      "ground_truth_citation": "Valmiki Ramayana, Sundara Kanda, Sarga 15"
+    },
+    {
+      "id": "q022",
+      "category": "retrieval_character",
+      "query": "What are Bhishma's teachings to Yudhishthira after the war?",
+      "expected_sources": ["mahabharata_shanti_parva_dharma_001"],
+      "expected_kanda": "Shanti Parva",
+      "expected_concepts": ["ahimsa", "rajadharma", "dharma is subtle", "arrow bed"],
+      "ground_truth_citation": "Mahabharata, Shanti Parva"
+    },
+    {
+      "id": "q023",
+      "category": "retrieval_telugu",
+      "query": "హనుమంతుడు సీతమ్మను ఎలా కనుగొన్నాడు?",
+      "expected_sources": ["valmiki_ramayana_sundara_0015", "valmiki_ramayana_sundara_0034"],
+      "expected_kanda": "Sundara Kanda",
+      "expected_concepts": ["అశోకవనం", "సీతమ్మ", "లంక"],
+      "ground_truth_citation": "వాల్మీకి రామాయణం, సుందరకాండ"
+    },
+    {
+      "id": "q024",
+      "category": "retrieval_telugu",
+      "query": "కర్మయోగం అంటే ఏమిటి? భగవద్గీత ఏమి చెప్తుంది?",
+      "expected_sources": ["bhagavad_gita_02_047", "bhagavad_gita_06_005"],
+      "expected_kanda": "Bhishma Parva",
+      "expected_concepts": ["కర్మ", "ఫలాపేక్ష లేకుండా", "నిష్కామ కర్మ"],
+      "ground_truth_citation": "భగవద్గీత, అధ్యాయం 2, శ్లోకం 47"
+    },
+    {
+      "id": "q025",
+      "category": "retrieval_conceptual",
+      "query": "I am dealing with loss and grief. What do the scriptures say?",
+      "expected_sources": ["bhagavad_gita_02_020", "bhagavata_purana_10_014_008", "bhagavad_gita_02_047"],
+      "expected_kanda": null,
+      "expected_concepts": ["soul is eternal", "suffering as grace", "detachment", "grief"],
+      "ground_truth_citation": "Bhagavad Gita, Chapter 2; Bhagavata Purana, Skandha 10",
+      "notes": "Tests guidance mode — answer should be warm, grounded, not prescriptive"
+    }
+  ],
+  "evaluation_rubric": {
+    "retrieval_hit": "Was at least 1 expected_source in the top-5 retrieved results? (pass/fail per query)",
+    "citation_present": "Does the answer include at least one ground_truth_citation? (pass/fail)",
+    "no_hallucination": "Does the answer avoid fabricating verse numbers or characters? (manual review)",
+    "mode_adherence": "Does the response tone match the requested mode? (manual review)",
+    "telugu_quality": "For Telugu queries: is the response in Telugu or transliterated? (manual review)"
+  }
+}

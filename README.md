@@ -1,6 +1,6 @@
 # DharmaGPT
 
-> AI-powered wisdom from the Valmiki Ramayana, Mahabharata, Bhagavad Gita, Upanishads, and Puranas — built for Bharat, accessible to the world.
+> AI-powered wisdom from the Valmiki Ramayana, Mahabharata, Bhagavad Gita, Upanishads, and Puranas — built from Bharat, accessible to the world.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Made in India](https://img.shields.io/badge/Made%20in-India-orange)](https://github.com/dharmagpt)
@@ -27,6 +27,7 @@ DharmaGPT is an open-source AI backend that powers natural-language access to th
 | **Scholarly Lookup** | Search verses, themes, characters across all texts |
 | **Audio Support** | Listen to Sanskrit chantings, search within pravachanams |
 | **22 Indian Languages** | Powered by Sarvam AI's Saaras v3 for multilingual audio |
+| **Pluggable Translation Backends** | Swap between API and local models such as Anthropic, Ollama, or IndicTrans2 |
 
 ---
 
@@ -38,6 +39,7 @@ LLM             →  Claude (Anthropic) via API
 Vector Search   →  Pinecone
 Embeddings      →  OpenAI text-embedding-3-large
 Audio STT/TTS   →  Sarvam AI (Saaras v3 + Bulbul v3)
+Translation     →  Anthropic, Ollama, IndicTrans2
 ```
 
 ---
@@ -75,6 +77,64 @@ pip install -r requirements.txt
 cp .env.example .env   # fill in your keys
 uvicorn api.main:app --reload --port 8000
 ```
+
+### Local Translation Backends
+
+For Telugu to English translation, the audio pipeline now supports multiple backends:
+
+- `anthropic` for Claude-based translation
+- `ollama` for local models
+- `indictrans2` for AI4Bharat IndicTrans2
+
+The official AI4Bharat repository is cloned under `downloads/IndicTrans2`. Their top-level `install.sh` is Linux/conda-oriented, so on Windows we install the Python dependencies directly in the local runtime and use the Hugging Face model path through the shared translation layer.
+
+### Manual Translation Review API
+
+The manual translation endpoints now use dataset IDs instead of raw file paths and support an API key gate.
+
+- `POST /api/v1/audio/manual-translations/chunk`
+- `POST /api/v1/audio/manual-translations/bulk`
+- `POST /api/v1/audio/manual-translations/review`
+- `GET /api/v1/audio/manual-translations/datasets/{dataset_id}/pending`
+
+Set `MANUAL_TRANSLATION_API_KEY` in `.env` before exposing the API to employees. Keep approved datasets under `MANUAL_TRANSLATION_DATASET_ROOT` and list any explicit allowlist in `MANUAL_TRANSLATION_ALLOWED_DATASETS`.
+
+### Internal Admin UI
+
+The repo also includes a simple server-rendered review console at:
+
+- `GET /admin/manual-translations`
+
+It reads and updates the same manual translation API used by the backend. The page stores the `X-API-Key` locally in the browser and lets reviewers:
+
+- load a dataset by ID
+- edit `text_en_manual`
+- save draft changes
+- mark chunks `approved`, `needs_work`, or `rejected`
+
+### Team Server Deployment
+
+For an internal team server, the recommended setup is Docker Compose plus Nginx:
+
+```bash
+cp dharmagpt/.env.example dharmagpt/.env
+# fill in the API keys and manual translation settings
+docker compose up --build -d
+```
+
+Required manual translation settings:
+
+- `MANUAL_TRANSLATION_API_KEY`
+- `MANUAL_TRANSLATION_DATASET_ROOT=knowledge/processed`
+- `MANUAL_TRANSLATION_AUDIT_LOG=knowledge/audit/manual_translation_audit.jsonl`
+- `MANUAL_TRANSLATION_ALLOWED_DATASETS=dataset_one,dataset_two`
+
+The compose stack runs:
+
+- `app` on port `8000` inside the Docker network
+- `nginx` on port `80` for public access
+
+Place your editable JSONL files under `dharmagpt/knowledge/processed/` and mount that directory so translations persist across restarts. If your team should only access the tool internally, put the server behind VPN, a private subnet, or an identity-aware proxy.
 
 ### Ingest Data
 

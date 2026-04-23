@@ -1,0 +1,13 @@
+.git
+.venv
+.venv-1
+__pycache__
+*.pyc
+*.pyo
+*.log
+data
+downloads
+.claude
+node_modules
+dist
+build

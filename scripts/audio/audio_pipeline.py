@@ -16,17 +16,23 @@ import sys
 import json
 import time
 import uuid
+import tempfile
 import argparse
+import subprocess
 from pathlib import Path
 from tqdm import tqdm
 import requests
 from dotenv import load_dotenv
+import imageio_ffmpeg
 
-load_dotenv("../../dharmagpt/.env")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+load_dotenv(REPO_ROOT / "dharmagpt" / ".env")
 
 SARVAM_API_KEY  = os.getenv("SARVAM_API_KEY", "")
 SARVAM_STT_URL  = "https://api.sarvam.ai/speech-to-text"
 SUPPORTED       = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus", ".wma"}
+MAX_REALTIME_SEGMENT_MS = 29_000
 
 SACRED_MARKERS  = [
     "shri ram", "jai ram", "jai hanuman", "namah shivaya", "om namo",
@@ -44,15 +50,23 @@ THEMES = {
 }
 
 
-# ── Sarvam STT ─────────────────────────────────────────────────────────────────
+def resolve_input_path(value: str) -> Path:
+    path = Path(value)
+    if path.exists():
+        return path
 
-def transcribe(path: Path, lang: str) -> dict:
-    """Call Saaras v3. Cache result as .transcript.json next to audio."""
-    cache = path.with_suffix(".transcript.json")
-    if cache.exists():
-        print(f"    [cache] {cache.name}")
-        return json.loads(cache.read_text(encoding="utf-8"))
+    repo_path = REPO_ROOT / value
+    if repo_path.exists():
+        return repo_path
 
+    return path
+
+
+def _ffmpeg_path() -> str:
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def _transcribe_request(path: Path, lang: str) -> dict:
     mime_map = {
         ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4",
         ".aac": "audio/aac", ".ogg": "audio/ogg", ".flac": "audio/flac",
@@ -71,12 +85,113 @@ def transcribe(path: Path, lang: str) -> dict:
             "model": "saaras:v3",
             "language_code": lang,
             "with_timestamps": "true",
-            "with_diarization": "true",
         },
         timeout=120,
     )
-    resp.raise_for_status()
-    data = resp.json()
+
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        if resp.status_code in {401, 403}:
+            raise RuntimeError(
+                "Sarvam STT authentication failed (401/403). "
+                "Verify SARVAM_API_KEY in dharmagpt/.env and ensure it is active."
+            ) from exc
+
+        message = ""
+        try:
+            message = (resp.json().get("error") or {}).get("message", "")
+        except Exception:
+            message = resp.text
+
+        raise RuntimeError(
+            f"Sarvam STT request failed with status {resp.status_code}: {message or 'Unknown error'}"
+        ) from exc
+
+    return resp.json()
+
+
+def _transcribe_long_audio(path: Path, lang: str) -> dict:
+    merged_words = []
+    transcript_parts = []
+
+    with tempfile.TemporaryDirectory(prefix="sarvam_chunks_") as tmp:
+        tmp_dir = Path(tmp)
+        ffmpeg = _ffmpeg_path()
+        seg_seconds = str(MAX_REALTIME_SEGMENT_MS / 1000)
+        out_pattern = str(tmp_dir / "part_%04d.mp3")
+        cmd = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(path),
+            "-f",
+            "segment",
+            "-segment_time",
+            seg_seconds,
+            "-c:a",
+            "libmp3lame",
+            out_pattern,
+        ]
+        run = subprocess.run(cmd, capture_output=True, text=True)
+        if run.returncode != 0:
+            raise RuntimeError(f"ffmpeg split failed: {run.stderr.strip() or 'unknown error'}")
+
+        parts = sorted(tmp_dir.glob("part_*.mp3"))
+        if not parts:
+            raise RuntimeError("ffmpeg split produced no segments")
+
+        print(f"    [info] split into {len(parts)} segments of up to {MAX_REALTIME_SEGMENT_MS / 1000:.0f}s")
+
+        for i, clip_path in enumerate(tqdm(parts, desc="  STT segments", leave=False)):
+            part = _transcribe_request(clip_path, lang)
+            part_text = (part.get("transcript") or "").strip()
+            if part_text:
+                transcript_parts.append(part_text)
+
+            offset_sec = i * (MAX_REALTIME_SEGMENT_MS / 1000.0)
+            for w in part.get("words", []):
+                ww = dict(w)
+                if isinstance(ww.get("start"), (int, float)):
+                    ww["start"] = ww["start"] + offset_sec
+                if isinstance(ww.get("end"), (int, float)):
+                    ww["end"] = ww["end"] + offset_sec
+                merged_words.append(ww)
+
+            time.sleep(0.1)
+
+    return {
+        "transcript": " ".join(transcript_parts).strip(),
+        "words": merged_words,
+    }
+
+
+# ── Sarvam STT ─────────────────────────────────────────────────────────────────
+
+def transcribe(path: Path, lang: str) -> dict:
+    """Call Saaras v3. Cache result as .transcript.json next to audio."""
+    if not SARVAM_API_KEY:
+        env_path = REPO_ROOT / "dharmagpt" / ".env"
+        raise RuntimeError(
+            f"SARVAM_API_KEY is not set. Create {env_path} and add SARVAM_API_KEY=<your_key>."
+        )
+
+    cache = path.with_suffix(".transcript.json")
+    if cache.exists():
+        print(f"    [cache] {cache.name}")
+        return json.loads(cache.read_text(encoding="utf-8"))
+
+    try:
+        data = _transcribe_request(path, lang)
+    except RuntimeError as exc:
+        if "audio duration exceeds the maximum limit" not in str(exc).lower():
+            raise
+        print(f"    [info] long audio detected, splitting into {MAX_REALTIME_SEGMENT_MS / 1000:.0f}s segments")
+        data = _transcribe_long_audio(path, lang)
+
     cache.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return data
 
@@ -182,14 +297,14 @@ def process_file(path: Path, out_path: Path, lang: str, file_meta: dict):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input",  required=True)
-    parser.add_argument("--output", default="../../data/chunks/audio_chunks.jsonl")
+    parser.add_argument("--output", default=str(REPO_ROOT / "data" / "chunks" / "audio_chunks.jsonl"))
     parser.add_argument("--lang",   default="hi-IN")
     parser.add_argument("--batch",  action="store_true")
     parser.add_argument("--kanda",  default="")
     parser.add_argument("--desc",   default="")
     args = parser.parse_args()
 
-    inp  = Path(args.input)
+    inp  = resolve_input_path(args.input)
     out  = Path(args.output)
     meta = {"lang": args.lang, "kanda": args.kanda, "description": args.desc}
 
