@@ -2,29 +2,29 @@
 
 ## Overview
 
+DharmaGPT is a standalone AI engine that exposes a REST API. Other projects (mobile apps, web frontends, bots) call it — it does not contain any frontend code.
+
 ```
-React Native (Expo)
+Caller (any client)
     │  REST (JSON)
     ▼
-FastAPI Backend
+FastAPI  (dharmagpt/api/)
     ├── Query → RAG Engine → Pinecone → Claude → Response
     └── Audio → Sarvam STT → Chunker → Pinecone
 ```
 
 ## Data Flow: Query
 
-1. User types or speaks a question in the mobile app
-2. If spoken: Sarvam Saaras v3 transcribes in real-time on device
-3. App sends `POST /api/v1/query` with `{query, mode, history}`
-4. Backend embeds query via OpenAI `text-embedding-3-large`
-5. Pinecone returns top-5 most similar chunks from the corpus
-6. Retrieved passages are injected into Claude's system prompt
-7. Claude generates an answer grounded in those passages, with citations
-8. Response returned with `answer` + `sources[]` (citation, sarga, score)
+1. Caller sends `POST /api/v1/query` with `{query, mode, history}`
+2. Backend embeds query via OpenAI `text-embedding-3-large`
+3. Pinecone returns top-5 most similar chunks from the corpus
+4. Retrieved passages are injected into Claude's system prompt
+5. Claude generates an answer grounded in those passages, with citations
+6. Response returned with `answer` + `sources[]` (citation, sarga, score)
 
 ## Data Flow: Audio Ingestion
 
-1. User uploads audio file (chanting, pravachanam, discourse)
+1. Caller uploads audio file (chanting, pravachanam, discourse) via `POST /api/v1/audio/transcribe`
 2. Backend sends to Sarvam Saaras v3 with `with_timestamps=true`
 3. Word-level timestamps used to chunk at natural pause boundaries (>0.8s)
 4. Each chunk tagged: speaker type (chanting vs commentary), shloka detection, kanda
@@ -84,4 +84,3 @@ Metadata:
 - Pinecone serverless scales automatically; no ops needed
 - FastAPI workers can be added behind a load balancer (Railway, Render, AWS)
 - Audio transcription is the bottleneck — queue long files with Celery + Redis
-- Mobile app works offline for cached conversations; requires connection for queries

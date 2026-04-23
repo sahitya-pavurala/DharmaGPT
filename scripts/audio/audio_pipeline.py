@@ -22,7 +22,7 @@ from tqdm import tqdm
 import requests
 from dotenv import load_dotenv
 
-load_dotenv("../../backend/.env")
+load_dotenv("../../dharmagpt/.env")
 
 SARVAM_API_KEY  = os.getenv("SARVAM_API_KEY", "")
 SARVAM_STT_URL  = "https://api.sarvam.ai/speech-to-text"

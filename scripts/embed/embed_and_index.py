@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pinecone import Pinecone, ServerlessSpec
 
-load_dotenv("../../backend/.env")
+load_dotenv("../../dharmagpt/.env")
 
 EMBED_MODEL    = "text-embedding-3-large"
 EMBED_DIMS     = 3072

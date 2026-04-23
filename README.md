@@ -46,20 +46,16 @@ Audio STT/TTS   →  Sarvam AI (Saaras v3 + Bulbul v3)
 
 ```
 dharmagpt/
-├── backend/                  # FastAPI backend
-│   ├── api/routes/           # API route handlers
-│   ├── core/                 # RAG engine, retrieval, LLM
-│   ├── pipelines/            # Data ingestion pipelines
-│   ├── models/               # Pydantic models
-│   └── utils/                # Helpers, logging
-├── mobile/                   # (optional, planned later)
-├── scripts/
-│   ├── scraper/              # scraper
-│   ├── audio/                # Sarvam audio pipeline
-│   └── embed/                # Pinecone embedding pipeline
-├── data/                     # Local data (gitignored)
-├── docs/                     # Architecture, API docs
-└── tests/                    # Backend + mobile tests
+├── api/routes/           # FastAPI route handlers
+├── core/                 # RAG engine, retrieval, LLM
+├── pipelines/            # Data ingestion pipelines
+├── models/               # Pydantic models
+└── utils/                # Helpers, logging
+scripts/
+├── audio/                # Sarvam audio pipeline
+└── embed/                # Pinecone embedding pipeline
+data/                     # Local data (gitignored)
+tests/                    # Tests
 ```
 
 ---
@@ -68,15 +64,13 @@ dharmagpt/
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 20+
-- Expo CLI (`npm install -g expo-cli`)
 - API keys: Anthropic, Pinecone, OpenAI (embeddings), Sarvam AI
 
-### Backend
+### Run the API
 
 ```bash
-cd backend
-python -m venv venv && source venv/bin/activate
+cd dharmagpt
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in your keys
 uvicorn api.main:app --reload --port 8000

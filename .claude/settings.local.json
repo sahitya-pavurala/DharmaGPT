@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Move-Item -Path \"c:\\\\Users\\\\sahit\\\\OneDrive\\\\Projects\\\\DharmaGPT\\\\DharmaGPT\\\\backend\" -Destination \"c:\\\\Users\\\\sahit\\\\OneDrive\\\\Projects\\\\DharmaGPT\\\\pkg_temp\")",
+      "PowerShell(Rename-Item -Path \"c:\\\\Users\\\\sahit\\\\OneDrive\\\\Projects\\\\DharmaGPT\\\\pkg_temp\" -NewName \"dharmagpt\")"
+    ]
+  }
+}
