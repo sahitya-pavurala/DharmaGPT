@@ -1,14 +1,15 @@
 """
-Batch segment + transcribe audio sources into 29-second clips.
+transcribe_audio_batch.py — split audio files into 29s clips and transcribe each via the API.
 
-For each input audio file:
-1. Split into persistent 29s MP3 chunks.
-2. Upload each chunk to the running DharmaGPT audio transcription API.
-3. Persist a batch manifest with the returned transcript file names.
+For each source audio file found in the input directory:
+1. Splits the file into persistent 29-second MP3 clips using ffmpeg.
+2. Uploads each clip to the running DharmaGPT transcription API endpoint.
+3. Writes a batch manifest JSON with transcript file names and per-chunk results.
 
-The API saves each clip as a canonical JSONL transcript artifact, so this
-script is the orchestration layer that turns large source files into the
-chunked pipeline the API expects.
+The API writes each transcript as a canonical JSONL artifact under
+knowledge/processed/, so this script is the orchestration layer that turns
+large source recordings into the chunked pipeline format the system expects.
+Requires the DharmaGPT API server to be running (see --api-url).
 """
 
 from __future__ import annotations

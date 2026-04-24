@@ -1,13 +1,14 @@
 """
-ingest.py — DharmaGPT Text Corpus Ingestion Script
-====================================================
-Reads JSONL files from knowledge/processed/, embeds each chunk using
-OpenAI text-embedding-3-large, and upserts vectors to Pinecone.
+ingest_to_pinecone.py — embed corpus records and upsert vectors to Pinecone.
+
+Reads JSONL files from knowledge/processed/, validates each record, embeds the
+text using OpenAI text-embedding-3-large (3072 dims), and upserts to the
+configured Pinecone index. Supports dry-run validation and full index re-builds.
 
 Usage:
-    python scripts/ingest.py                          # all JSONL in knowledge/processed/
-    python scripts/ingest.py --file seed_corpus.jsonl # specific file
-    python scripts/ingest.py --dry-run                # validate + count, no upsert
+    python scripts/ingest_to_pinecone.py                          # all JSONL in knowledge/processed/
+    python scripts/ingest_to_pinecone.py --file seed_corpus.jsonl # specific file
+    python scripts/ingest_to_pinecone.py --dry-run                # validate + count, no upsert
     python scripts/ingest.py --delete-index           # wipe index and re-ingest
 """
 

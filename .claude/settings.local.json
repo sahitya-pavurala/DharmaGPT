@@ -5,7 +5,8 @@
       "PowerShell(Rename-Item -Path \"c:\\\\Users\\\\sahit\\\\OneDrive\\\\Projects\\\\DharmaGPT\\\\pkg_temp\" -NewName \"dharmagpt\")",
       "Bash(rm \"c:/Users/sahit/OneDrive/Projects/DharmaGPT/scripts/audio/batch_segment_and_transcribe.py\")",
       "Bash(rm \"c:/Users/sahit/OneDrive/Projects/DharmaGPT/scripts/embed/embed_and_index.py\")",
-      "Bash(rmdir \"c:/Users/sahit/OneDrive/Projects/DharmaGPT/scripts/embed\")"
+      "Bash(rmdir \"c:/Users/sahit/OneDrive/Projects/DharmaGPT/scripts/embed\")",
+      "Bash(PYTHONPATH=. ../.venv/Scripts/python -m pytest tests/test_response_scorer.py -v)"
     ]
   }
 }

@@ -1,13 +1,14 @@
 """
-normalize.py — DharmaGPT Corpus Normalizer
-===========================================
-Converts scraped JSONL files (nested metadata schema) into the flat
-DharmaGPT corpus schema, cleaning text and fixing encoding issues.
+normalize_raw_corpus.py — convert scraped raw JSONL into the flat DharmaGPT corpus schema.
+
+Reads scraped files (nested metadata structure) from the data/chunks/ directory,
+cleans text, fixes encoding issues, deduplicates records, and writes flat partitioned
+JSONL files to knowledge/processed/ ready for translation and Pinecone ingestion.
 
 Usage:
-    python scripts/normalize.py                         # normalize all scraped files
-    python scripts/normalize.py --file sundara_chunks.jsonl
-    python scripts/normalize.py --dry-run               # report issues, don't write
+    python scripts/normalize_raw_corpus.py                         # normalize all scraped files
+    python scripts/normalize_raw_corpus.py --file sundara_chunks.jsonl
+    python scripts/normalize_raw_corpus.py --dry-run               # report issues, don't write
     python scripts/normalize.py --author chaganti --language te --kind audio
 """
 

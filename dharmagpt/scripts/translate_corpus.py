@@ -1,10 +1,14 @@
 """
-auto_translate.py — batch auto-translate processed JSONL datasets.
+translate_corpus.py — batch-translate processed JSONL corpus records to English.
+
+Reads JSONL files under knowledge/processed/ and fills the text_en_model field
+for records that are not yet translated (non-English, no existing text_en_model).
+Tries Anthropic first, falls back to Ollama, then IndicTrans2.
 
 Usage:
-    python scripts/auto_translate.py
-    python scripts/auto_translate.py --file seed_corpus.jsonl
-    python scripts/auto_translate.py --max-workers 6 --force
+    python scripts/translate_corpus.py
+    python scripts/translate_corpus.py --file audio_transcript/my_dataset/part01.jsonl
+    python scripts/translate_corpus.py --max-workers 6 --force
 """
 
 from __future__ import annotations

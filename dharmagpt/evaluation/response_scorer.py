@@ -1,0 +1,230 @@
+"""
+response_scorer.py — score a DharmaGPT RAG response across quality dimensions.
+
+Entry point: validate_response(query, response) → ValidationResult
+
+Four LLM-judged metrics (one Anthropic API call per response):
+  faithfulness         — are claims grounded in the retrieved passages?
+  answer_relevance     — does the answer address the query?
+  context_utilization  — does the answer draw from retrieved passages or ignore them?
+  citation_precision   — are inline citations accurate and traceable?
+
+Two rule-based metrics (free, no API call):
+  retrieval stats      — cosine score mean/min, source count, kanda diversity
+  mode_compliance      — structural format check per query mode
+
+Overall score is a weighted average of the four LLM metrics.
+A response passes when overall_score >= PASS_THRESHOLD (0.65).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import statistics
+
+import structlog
+
+from core.config import get_settings
+from core.llm import LLMBackend, LLMConfig, generate_text_sync
+from evaluation.metric_definitions import MetricScore, RetrievalStats, ValidationResult
+from models.schemas import QueryResponse, SourceChunk
+
+log = structlog.get_logger()
+settings = get_settings()
+
+PASS_THRESHOLD = 0.65
+
+# Weighted contribution of each LLM-judged metric to overall_score (must sum to 1.0)
+METRIC_WEIGHTS: dict[str, float] = {
+    "faithfulness": 0.35,
+    "answer_relevance": 0.30,
+    "context_utilization": 0.20,
+    "citation_precision": 0.15,
+}
+
+# Regex patterns used to check whether an answer follows the expected mode format
+_MODE_COMPLIANCE_PATTERNS: dict[str, re.Pattern] = {
+    "guidance": re.compile(r"\?"),
+    "story": re.compile(r"SOURCE\s*:", re.IGNORECASE),
+    "children": re.compile(r"(what this story teaches|teaches us|moral)", re.IGNORECASE),
+    "scholar": re.compile(r"(Kanda|Parva|Sarga|Chapter)\s*\d+", re.IGNORECASE),
+}
+
+_JUDGE_SYSTEM = (
+    "You are a precise evaluator for a Hindu sacred texts Q&A system. "
+    "Return only valid JSON — no markdown fences, no extra text."
+)
+
+_JUDGE_PROMPT = """\
+Evaluate this response from DharmaGPT, a Q&A system grounded in Hindu sacred texts.
+
+QUERY:
+{query}
+
+RETRIEVED PASSAGES (the only factual source the system should draw from):
+{passages}
+
+SYSTEM RESPONSE:
+{answer}
+
+Return ONLY this JSON object. Do not wrap it in markdown or add any explanation:
+{{
+  "faithfulness": {{
+    "score": <0.0-1.0>,
+    "unsupported_claims": ["<claim not found in passages>"],
+    "reasoning": "<one sentence>"
+  }},
+  "answer_relevance": {{
+    "score": <0.0-1.0>,
+    "reasoning": "<one sentence>"
+  }},
+  "context_utilization": {{
+    "score": <0.0-1.0>,
+    "reasoning": "<one sentence>"
+  }},
+  "citation_precision": {{
+    "score": <0.0-1.0>,
+    "invalid_citations": ["<citation that cannot be verified against the passages>"],
+    "reasoning": "<one sentence>"
+  }}
+}}
+
+SCORING CRITERIA:
+
+faithfulness (0–1): What fraction of specific factual claims (events, characters, teachings,
+verse contents) in the answer are directly supported by the retrieved passages above?
+Claims that come only from model training data — not from the passages — must be flagged
+as unsupported. Score 1.0 only if every factual claim is traceable to a passage.
+
+answer_relevance (0–1): How directly and completely does the answer address the user's
+query? 1.0 = fully on-topic and complete, 0.0 = completely off-topic or empty.
+
+context_utilization (0–1): To what degree is the answer grounded in the retrieved passages
+versus drawn from the model's general training data? 1.0 = answer is tightly built from
+the passages, 0.0 = passages are ignored entirely.
+
+citation_precision (0–1): What fraction of inline citations of the form [Text, Kanda,
+Sarga/Chapter X] are accurate and traceable to the retrieved passages? If the answer
+makes specific claims without any citations at all, score 0.0.
+"""
+
+
+def _llm_config() -> LLMConfig:
+    return LLMConfig(
+        backend=LLMBackend.anthropic,
+        model=settings.anthropic_model,
+        api_key=settings.anthropic_api_key,
+        max_tokens=1024,
+    )
+
+
+def _format_passages_for_judge(sources: list[SourceChunk]) -> str:
+    if not sources:
+        return "[No passages were retrieved for this query]"
+    parts = []
+    for i, s in enumerate(sources, 1):
+        if s.kanda and s.sarga:
+            location = f"{s.kanda}, Sarga {s.sarga}"
+        else:
+            location = s.kanda or s.citation
+        parts.append(f"[{i}] {location} (retrieval score={s.score})\n{s.text}")
+    return "\n\n".join(parts)
+
+
+def _call_judge(query: str, answer: str, sources: list[SourceChunk]) -> dict:
+    prompt = _JUDGE_PROMPT.format(
+        query=query,
+        passages=_format_passages_for_judge(sources),
+        answer=answer,
+    )
+    raw = generate_text_sync(
+        _JUDGE_SYSTEM,
+        [{"role": "user", "content": prompt}],
+        _llm_config(),
+    )
+    # Strip markdown code fences if the model added them despite instructions
+    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+    raw = re.sub(r"```\s*$", "", raw.strip())
+    return json.loads(raw)
+
+
+def _build_metric(name: str, judge_data: dict, detail_key: str | None = None) -> MetricScore:
+    details: dict = {}
+    if detail_key and judge_data.get(detail_key):
+        details[detail_key] = judge_data[detail_key]
+    return MetricScore(
+        name=name,
+        score=float(judge_data.get("score", 0.0)),
+        reasoning=judge_data.get("reasoning", ""),
+        details=details,
+    )
+
+
+def _compute_retrieval_stats(sources: list[SourceChunk]) -> RetrievalStats:
+    scores = [s.score for s in sources]
+    unique_kandas = {s.kanda for s in sources if s.kanda}
+    return RetrievalStats(
+        score_mean=round(statistics.mean(scores), 4) if scores else 0.0,
+        score_min=round(min(scores), 4) if scores else 0.0,
+        source_count=len(sources),
+        kanda_diversity=len(unique_kandas),
+    )
+
+
+def _check_mode_compliance(answer: str, mode: str) -> bool:
+    pattern = _MODE_COMPLIANCE_PATTERNS.get(mode)
+    return bool(pattern and pattern.search(answer))
+
+
+def _compute_overall_score(metrics: dict[str, MetricScore]) -> float:
+    return sum(METRIC_WEIGHTS[k] * m.score for k, m in metrics.items())
+
+
+def validate_response(query: str, response: QueryResponse) -> ValidationResult:
+    """
+    Score a RAG response across faithfulness, relevance, context use, and citation quality.
+
+    Makes one Anthropic API call for the LLM-judged metrics.
+    Rule-based metrics (retrieval stats, mode compliance) are computed locally.
+
+    Returns a ValidationResult with per-metric scores and an overall pass/fail.
+    """
+    log.info("scoring_response", query_id=response.query_id, mode=response.mode)
+
+    judge_data = _call_judge(query, response.answer, response.sources)
+
+    faithfulness = _build_metric("faithfulness", judge_data["faithfulness"], "unsupported_claims")
+    answer_relevance = _build_metric("answer_relevance", judge_data["answer_relevance"])
+    context_utilization = _build_metric("context_utilization", judge_data["context_utilization"])
+    citation_precision = _build_metric("citation_precision", judge_data["citation_precision"], "invalid_citations")
+
+    llm_metrics = {
+        "faithfulness": faithfulness,
+        "answer_relevance": answer_relevance,
+        "context_utilization": context_utilization,
+        "citation_precision": citation_precision,
+    }
+    overall = _compute_overall_score(llm_metrics)
+
+    result = ValidationResult(
+        query_id=response.query_id,
+        query=query,
+        mode=response.mode.value,
+        faithfulness=faithfulness,
+        answer_relevance=answer_relevance,
+        context_utilization=context_utilization,
+        citation_precision=citation_precision,
+        retrieval=_compute_retrieval_stats(response.sources),
+        mode_compliance=_check_mode_compliance(response.answer, response.mode.value),
+        overall_score=overall,
+        passed=overall >= PASS_THRESHOLD,
+    )
+
+    log.info(
+        "scoring_done",
+        query_id=response.query_id,
+        overall=round(overall, 3),
+        passed=result.passed,
+    )
+    return result
