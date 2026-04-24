@@ -1,9 +1,9 @@
 """
-batch_runner.py — run the validation pipeline over a set of sample questions.
+batch_runner.py - run the validation pipeline over a set of sample questions.
 
-load_questions(path)   — read a JSONL file of {query, mode} objects
-run_batch(questions)   — generate a live RAG response for each question and score it
-summarize(results)     — aggregate ValidationResult list into a human-readable summary dict
+load_questions(path)   - read a JSONL file of {query, mode} objects
+run_batch(questions)   - generate a live RAG response for each question and score it
+summarize(results)     - aggregate ValidationResult list into a human-readable summary dict
 
 Typical flow (called by scripts/run_evaluation.py):
     questions = load_questions(Path("evaluation/sample_questions.jsonl"))
@@ -50,15 +50,15 @@ async def _evaluate_one(q: dict) -> ValidationResult:
         filter_kanda=q.get("filter_kanda"),
     )
     response = await answer(request)
-    # validate_response is synchronous (one blocking Anthropic call) — run in thread
+    # validate_response is synchronous (two blocking local judge calls by default) - run in thread
     return await asyncio.to_thread(validate_response, q["query"], response)
 
 
 async def run_batch(questions: list[dict]) -> list[ValidationResult]:
     """Generate and score a RAG response for each question sequentially.
 
-    Sequential (not concurrent) to avoid hammering the Anthropic API with
-    parallel judge calls on top of parallel generation calls.
+    Sequential (not concurrent) to avoid hammering the judge stack with
+    parallel calls on top of parallel generation calls.
     """
     results: list[ValidationResult] = []
     for i, q in enumerate(questions, 1):

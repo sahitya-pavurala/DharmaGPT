@@ -21,6 +21,19 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5:7b"
     ollama_url: str = "http://localhost:11434"
 
+    # Evaluation judges
+    evaluation_primary_backend: str = "openai"
+    evaluation_primary_model: str = "sarvamai/sarvam-m"
+    evaluation_primary_api_key: str = ""
+    evaluation_primary_base_url: str = "http://localhost:8000/v1"
+    evaluation_primary_timeout_sec: int = 120
+
+    evaluation_secondary_backend: str = "openai"
+    evaluation_secondary_model: str = "sarvamai/sarvam-30b"
+    evaluation_secondary_api_key: str = ""
+    evaluation_secondary_base_url: str = "http://localhost:8000/v1"
+    evaluation_secondary_timeout_sec: int = 120
+
     # OpenAI (embeddings)
     openai_api_key: str
     embedding_model: str = "text-embedding-3-large"
@@ -53,6 +66,25 @@ class Settings(BaseSettings):
     @property
     def resolved_llm_model(self) -> str:
         return self.llm_model or self.anthropic_model
+
+    def evaluation_model_for(self, role: str) -> tuple[str, str, str, str, int]:
+        if role == "primary":
+            return (
+                self.evaluation_primary_backend,
+                self.evaluation_primary_model,
+                self.evaluation_primary_api_key,
+                self.evaluation_primary_base_url,
+                self.evaluation_primary_timeout_sec,
+            )
+        if role == "secondary":
+            return (
+                self.evaluation_secondary_backend,
+                self.evaluation_secondary_model,
+                self.evaluation_secondary_api_key,
+                self.evaluation_secondary_base_url,
+                self.evaluation_secondary_timeout_sec,
+            )
+        raise ValueError(f"Unknown evaluation role: {role}")
 
     class Config:
         env_file = ".env"

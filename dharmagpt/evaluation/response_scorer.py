@@ -1,19 +1,17 @@
 """
-response_scorer.py — score a DharmaGPT RAG response across quality dimensions.
+response_scorer.py - score a DharmaGPT RAG response across quality dimensions.
 
-Entry point: validate_response(query, response) → ValidationResult
+Entry point: validate_response(query, response) -> ValidationResult
 
-Four LLM-judged metrics (one Anthropic API call per response):
-  faithfulness         — are claims grounded in the retrieved passages?
-  answer_relevance     — does the answer address the query?
-  context_utilization  — does the answer draw from retrieved passages or ignore them?
-  citation_precision   — are inline citations accurate and traceable?
+Local judge stack by default:
+  Sarvam-M     -> answer relevance, context utilization
+  Sarvam-30B   -> faithfulness, citation precision
 
 Two rule-based metrics (free, no API call):
-  retrieval stats      — cosine score mean/min, source count, kanda diversity
-  mode_compliance      — structural format check per query mode
+  retrieval stats -> cosine score mean/min, source count, kanda diversity
+  mode_compliance -> structural format check per query mode
 
-Overall score is a weighted average of the four LLM metrics.
+Overall score is a weighted average of the four judge metrics.
 A response passes when overall_score >= PASS_THRESHOLD (0.65).
 """
 
@@ -35,13 +33,16 @@ settings = get_settings()
 
 PASS_THRESHOLD = 0.65
 
-# Weighted contribution of each LLM-judged metric to overall_score (must sum to 1.0)
+# Weighted contribution of each judge metric to overall_score (must sum to 1.0)
 METRIC_WEIGHTS: dict[str, float] = {
     "faithfulness": 0.35,
     "answer_relevance": 0.30,
     "context_utilization": 0.20,
     "citation_precision": 0.15,
 }
+
+_PRIMARY_METRICS = ("answer_relevance", "context_utilization")
+_SECONDARY_METRICS = ("faithfulness", "citation_precision")
 
 # Regex patterns used to check whether an answer follows the expected mode format
 _MODE_COMPLIANCE_PATTERNS: dict[str, re.Pattern] = {
@@ -53,10 +54,44 @@ _MODE_COMPLIANCE_PATTERNS: dict[str, re.Pattern] = {
 
 _JUDGE_SYSTEM = (
     "You are a precise evaluator for a Hindu sacred texts Q&A system. "
-    "Return only valid JSON — no markdown fences, no extra text."
+    "Return only valid JSON - no markdown fences, no extra text."
 )
 
-_JUDGE_PROMPT = """\
+_JUDGE_PROMPTS: dict[str, str] = {
+    "primary": """\
+Evaluate this response from DharmaGPT, a Q&A system grounded in Hindu sacred texts.
+
+QUERY:
+{query}
+
+RETRIEVED PASSAGES (the only factual source the system should draw from):
+{passages}
+
+SYSTEM RESPONSE:
+{answer}
+
+Return ONLY this JSON object. Do not wrap it in markdown or add any explanation:
+{{
+  "answer_relevance": {{
+    "score": <0.0-1.0>,
+    "reasoning": "<one sentence>"
+  }},
+  "context_utilization": {{
+    "score": <0.0-1.0>,
+    "reasoning": "<one sentence>"
+  }}
+}}
+
+SCORING CRITERIA:
+
+answer_relevance (0-1): How directly and completely does the answer address the user's
+query? 1.0 = fully on-topic and complete, 0.0 = completely off-topic or empty.
+
+context_utilization (0-1): To what degree is the answer grounded in the retrieved passages
+versus drawn from the model's general training data? 1.0 = answer is tightly built from
+the passages, 0.0 = passages are ignored entirely.
+""",
+    "secondary": """\
 Evaluate this response from DharmaGPT, a Q&A system grounded in Hindu sacred texts.
 
 QUERY:
@@ -75,14 +110,6 @@ Return ONLY this JSON object. Do not wrap it in markdown or add any explanation:
     "unsupported_claims": ["<claim not found in passages>"],
     "reasoning": "<one sentence>"
   }},
-  "answer_relevance": {{
-    "score": <0.0-1.0>,
-    "reasoning": "<one sentence>"
-  }},
-  "context_utilization": {{
-    "score": <0.0-1.0>,
-    "reasoning": "<one sentence>"
-  }},
   "citation_precision": {{
     "score": <0.0-1.0>,
     "invalid_citations": ["<citation that cannot be verified against the passages>"],
@@ -92,29 +119,26 @@ Return ONLY this JSON object. Do not wrap it in markdown or add any explanation:
 
 SCORING CRITERIA:
 
-faithfulness (0–1): What fraction of specific factual claims (events, characters, teachings,
+faithfulness (0-1): What fraction of specific factual claims (events, characters, teachings,
 verse contents) in the answer are directly supported by the retrieved passages above?
-Claims that come only from model training data — not from the passages — must be flagged
+Claims that come only from model training data - not from the passages - must be flagged
 as unsupported. Score 1.0 only if every factual claim is traceable to a passage.
 
-answer_relevance (0–1): How directly and completely does the answer address the user's
-query? 1.0 = fully on-topic and complete, 0.0 = completely off-topic or empty.
-
-context_utilization (0–1): To what degree is the answer grounded in the retrieved passages
-versus drawn from the model's general training data? 1.0 = answer is tightly built from
-the passages, 0.0 = passages are ignored entirely.
-
-citation_precision (0–1): What fraction of inline citations of the form [Text, Kanda,
+citation_precision (0-1): What fraction of inline citations of the form [Text, Kanda,
 Sarga/Chapter X] are accurate and traceable to the retrieved passages? If the answer
 makes specific claims without any citations at all, score 0.0.
-"""
+""",
+}
 
 
-def _llm_config() -> LLMConfig:
+def _llm_config(role: str) -> LLMConfig:
+    backend_name, model, api_key, base_url, timeout_sec = settings.evaluation_model_for(role)
     return LLMConfig(
-        backend=LLMBackend.anthropic,
-        model=settings.anthropic_model,
-        api_key=settings.anthropic_api_key,
+        backend=LLMBackend(backend_name),
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        timeout_sec=timeout_sec,
         max_tokens=1024,
     )
 
@@ -132,8 +156,8 @@ def _format_passages_for_judge(sources: list[SourceChunk]) -> str:
     return "\n\n".join(parts)
 
 
-def _call_judge(query: str, answer: str, sources: list[SourceChunk]) -> dict:
-    prompt = _JUDGE_PROMPT.format(
+def _call_judge(role: str, query: str, answer: str, sources: list[SourceChunk]) -> dict:
+    prompt = _JUDGE_PROMPTS[role].format(
         query=query,
         passages=_format_passages_for_judge(sources),
         answer=answer,
@@ -141,9 +165,8 @@ def _call_judge(query: str, answer: str, sources: list[SourceChunk]) -> dict:
     raw = generate_text_sync(
         _JUDGE_SYSTEM,
         [{"role": "user", "content": prompt}],
-        _llm_config(),
+        _llm_config(role),
     )
-    # Strip markdown code fences if the model added them despite instructions
     raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
     raw = re.sub(r"```\s*$", "", raw.strip())
     return json.loads(raw)
@@ -185,19 +208,23 @@ def validate_response(query: str, response: QueryResponse) -> ValidationResult:
     """
     Score a RAG response across faithfulness, relevance, context use, and citation quality.
 
-    Makes one Anthropic API call for the LLM-judged metrics.
+    Makes two local judge calls by default:
+      - Sarvam-M for answer relevance and context utilization
+      - Sarvam-30B for faithfulness and citation precision
+
     Rule-based metrics (retrieval stats, mode compliance) are computed locally.
 
     Returns a ValidationResult with per-metric scores and an overall pass/fail.
     """
     log.info("scoring_response", query_id=response.query_id, mode=response.mode)
 
-    judge_data = _call_judge(query, response.answer, response.sources)
+    primary_data = _call_judge("primary", query, response.answer, response.sources)
+    secondary_data = _call_judge("secondary", query, response.answer, response.sources)
 
-    faithfulness = _build_metric("faithfulness", judge_data["faithfulness"], "unsupported_claims")
-    answer_relevance = _build_metric("answer_relevance", judge_data["answer_relevance"])
-    context_utilization = _build_metric("context_utilization", judge_data["context_utilization"])
-    citation_precision = _build_metric("citation_precision", judge_data["citation_precision"], "invalid_citations")
+    faithfulness = _build_metric("faithfulness", secondary_data["faithfulness"], "unsupported_claims")
+    answer_relevance = _build_metric("answer_relevance", primary_data["answer_relevance"])
+    context_utilization = _build_metric("context_utilization", primary_data["context_utilization"])
+    citation_precision = _build_metric("citation_precision", secondary_data["citation_precision"], "invalid_citations")
 
     llm_metrics = {
         "faithfulness": faithfulness,

@@ -45,10 +45,7 @@ def generate_text_sync(system: str, messages: list[dict], config: LLMConfig) -> 
     if config.backend == LLMBackend.openai:
         from openai import OpenAI
 
-        if not config.api_key:
-            raise RuntimeError("OpenAI backend selected but no API key was provided")
-
-        client = OpenAI(api_key=config.api_key)
+        client = OpenAI(api_key=config.api_key or "EMPTY", base_url=config.base_url)
         response = client.chat.completions.create(
             model=config.model,
             messages=[{"role": "system", "content": system}, *messages],
