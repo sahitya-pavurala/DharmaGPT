@@ -27,7 +27,7 @@ settings = get_settings()
 
 
 def _require_key(x_api_key: str | None) -> None:
-    expected = settings.manual_translation_api_key
+    expected = settings.admin_api_key
     if expected and x_api_key != expected:
         raise HTTPException(status_code=401, detail="Invalid API key")
 

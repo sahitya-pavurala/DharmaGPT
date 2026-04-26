@@ -48,11 +48,8 @@ class Settings(BaseSettings):
     sarvam_api_key: str = ""
     indictrans2_model: str = "ai4bharat/indictrans2-indic-en-dist-200M"
 
-    # Manual translation review API
-    manual_translation_api_key: str = ""
-    manual_translation_dataset_root: str = "knowledge/processed"
-    manual_translation_audit_log: str = "knowledge/audit/manual_translation_audit.jsonl"
-    manual_translation_allowed_datasets: str = ""
+    # Admin / review API
+    admin_api_key: str = ""
 
     # RAG
     rag_top_k: int = 5

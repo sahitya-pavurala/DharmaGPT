@@ -119,17 +119,6 @@ For Telugu to English translation, the audio pipeline now supports multiple back
 
 The official AI4Bharat repository is cloned under `downloads/IndicTrans2`. Their top-level `install.sh` is Linux/conda-oriented, so on Windows we install the Python dependencies directly in the local runtime and use the Hugging Face model path through the shared translation layer.
 
-### Manual Translation Review API
-
-The manual translation endpoints now use dataset IDs instead of raw file paths and support an API key gate.
-
-- `POST /api/v1/audio/manual-translations/chunk`
-- `POST /api/v1/audio/manual-translations/bulk`
-- `POST /api/v1/audio/manual-translations/review`
-- `GET /api/v1/audio/manual-translations/datasets/{dataset_id}/pending`
-
-Set `MANUAL_TRANSLATION_API_KEY` in `.env` before exposing the API to employees. Keep approved datasets under `MANUAL_TRANSLATION_DATASET_ROOT` and list any explicit allowlist in `MANUAL_TRANSLATION_ALLOWED_DATASETS`.
-
 ### Knowledge File Naming
 
 Generated knowledge files now follow a canonical stem:
@@ -142,20 +131,35 @@ Examples:
 - `valmiki_ramayanam_chaganti_te_transcript_part01.jsonl`
 - `valmiki_ramayanam_valmiki_en_processed_part01.jsonl`
 
-Use this pattern for processed corpus files, audio transcripts, manual-review datasets, and future archive/database exports so the same identifier can survive migrations.
+Use this pattern for processed corpus files, audio transcripts, review datasets, and future archive/database exports so the same identifier can survive migrations.
 
 ### Internal Admin UI
 
-The repo also includes a simple server-rendered review console at:
+The repo includes a server-rendered response review console at:
 
-- `GET /admin/manual-translations`
+- `GET /admin/feedback`
 
-It reads and updates the same manual translation API used by the backend. The page stores the `X-API-Key` locally in the browser and lets reviewers:
+It uses the feedback API and gold store to review upvoted responses, approve strong answers into the benchmark set, and inspect the current gold corpus.
 
-- load a dataset by ID
-- edit `text_en_manual`
-- save draft changes
-- mark chunks `approved`, `needs_work`, or `rejected`
+### Gold Store Workflow
+
+Approved feedback responses are promoted into a versioned gold store in the local SQLite datastore at `knowledge/stores/dharmagpt.sqlite3`.
+
+The gold store is intentionally separate from live serving:
+
+- `feedback_responses` stores raw feedback events
+- `gold_entries` stores approved benchmark answers
+- `gold_audit` records review and promotion history
+
+This keeps the live RAG path grounded only in retrieved source passages, while the gold store is reserved for evaluation, regression checks, and offline prompt tuning.
+
+To back up or export the store:
+
+```powershell
+python -m dharmagpt.scripts.gold_store_backup --export-jsonl
+```
+
+This creates a timestamped SQLite backup under `knowledge/stores/backups/` and a portable JSONL export of the approved gold entries.
 
 ### Team Server Deployment
 
@@ -163,23 +167,20 @@ For an internal team server, the recommended setup is Docker Compose plus Nginx:
 
 ```bash
 cp dharmagpt/.env.example dharmagpt/.env
-# fill in the API keys and manual translation settings
+# fill in the API keys and admin key
 docker compose up --build -d
 ```
 
-Required manual translation settings:
+Required admin settings:
 
-- `MANUAL_TRANSLATION_API_KEY`
-- `MANUAL_TRANSLATION_DATASET_ROOT=knowledge/processed`
-- `MANUAL_TRANSLATION_AUDIT_LOG=knowledge/audit/manual_translation_audit.jsonl`
-- `MANUAL_TRANSLATION_ALLOWED_DATASETS=dataset_one,dataset_two`
+- `ADMIN_API_KEY`
 
 The compose stack runs:
 
 - `app` on port `8000` inside the Docker network
 - `nginx` on port `80` for public access
 
-Place your editable JSONL files under `dharmagpt/knowledge/processed/` and mount that directory so translations persist across restarts. If your team should only access the tool internally, put the server behind VPN, a private subnet, or an identity-aware proxy.
+If your team should only access the tool internally, put the server behind VPN, a private subnet, or an identity-aware proxy.
 
 ### Query the API
 
