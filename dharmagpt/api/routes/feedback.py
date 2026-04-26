@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import structlog
 from fastapi import APIRouter, HTTPException
-
 from evaluation.gold_store import (
     load_gold_entries,
     list_pending_feedback,
@@ -58,6 +57,11 @@ async def review_response(
 
     reviewer = body.get("reviewer")
     review_note = body.get("review_note")
+    gold_answer = body.get("gold_answer")
+    if gold_answer is not None and not isinstance(gold_answer, str):
+        raise HTTPException(status_code=400, detail="gold_answer must be a string when provided")
+    if status == "approved" and gold_answer is not None and not gold_answer.strip():
+        raise HTTPException(status_code=400, detail="gold_answer cannot be empty when approving")
 
     try:
         review_feedback_response(
@@ -65,6 +69,7 @@ async def review_response(
             status,
             reviewer=reviewer,
             review_note=review_note,
+            gold_answer_override=gold_answer,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

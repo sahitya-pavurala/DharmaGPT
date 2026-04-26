@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     manual_translation_audit_log: str = "knowledge/audit/manual_translation_audit.jsonl"
     manual_translation_allowed_datasets: str = ""
 
+    # Admin / review API
+    admin_api_key: str = ""
+
     # RAG
     rag_top_k: int = 5
     rag_min_score: float = 0.35
