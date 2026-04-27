@@ -39,10 +39,17 @@ async def test_retrieve_returns_filtered_results():
                   "kanda": "Sundara Kanda", "sarga": 15, "source_type": "text", "url": ""}),
     ]
 
-    with patch("core.retrieval.embed_query", new=AsyncMock(return_value=[0.1] * 3072)), \
-         patch("core.retrieval.get_pinecone") as mock_pc:
-        mock_pc.return_value.Index.return_value.query.return_value = mock_results
-        results = await retrieve("Where did Hanuman find Sita?")
+    from core import retrieval
+
+    original_backend = retrieval.settings.vector_db_backend
+    retrieval.settings.vector_db_backend = "pinecone"
+    try:
+        with patch("core.retrieval.embed_query", new=AsyncMock(return_value=[0.1] * 3072)), \
+             patch("core.retrieval.get_pinecone") as mock_pc:
+            mock_pc.return_value.Index.return_value.query.return_value = mock_results
+            results = await retrieve("Where did Hanuman find Sita?")
+    finally:
+        retrieval.settings.vector_db_backend = original_backend
 
     assert len(results) == 1
     assert results[0].score == 0.9

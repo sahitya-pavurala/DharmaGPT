@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from api.auth import require_staging_api_key
 from models.schemas import QueryRequest, QueryResponse
 from core.rag_engine import answer
 import structlog
@@ -8,7 +9,10 @@ log = structlog.get_logger()
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query_dharma(request: QueryRequest) -> QueryResponse:
+async def query_dharma(
+    request: QueryRequest,
+    _: None = Depends(require_staging_api_key),
+) -> QueryResponse:
     """
     Main RAG endpoint. Accepts a query + mode + optional conversation history.
     Returns an answer grounded in retrieved sacred text passages, with citations.

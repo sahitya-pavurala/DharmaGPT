@@ -37,11 +37,16 @@ async def answer(request: QueryRequest) -> QueryResponse:
     """
     log.info("rag_query", mode=request.mode, query=request.query[:80])
 
-    # 1. Retrieve
-    chunks: list[SourceChunk] = await retrieve(
-        query=request.query,
-        filter_section=request.filter_section,
-    )
+    # 1. Retrieve. If embeddings/vector retrieval are unavailable, keep the
+    # beta answer path alive and let the LLM respond without retrieved sources.
+    try:
+        chunks: list[SourceChunk] = await retrieve(
+            query=request.query,
+            filter_section=request.filter_section,
+        )
+    except Exception as exc:
+        log.warning("retrieval_unavailable", error=str(exc))
+        chunks = []
 
     # 2. Format context
     context = format_context(chunks)

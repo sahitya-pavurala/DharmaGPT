@@ -10,7 +10,8 @@ GET    /api/v1/feedback/gold             — list approved gold responses
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from api.auth import require_admin_api_key
 from evaluation.gold_store import (
     load_gold_entries,
     list_pending_feedback,
@@ -41,7 +42,7 @@ async def submit_feedback(request: FeedbackRequest) -> dict:
 
 
 @router.get("/feedback/pending")
-async def list_pending() -> dict:
+async def list_pending(_: None = Depends(require_admin_api_key)) -> dict:
     pending = list_pending_feedback()
     return {"pending": pending, "total": len(pending)}
 
@@ -50,6 +51,7 @@ async def list_pending() -> dict:
 async def review_response(
     query_id: str,
     body: dict,
+    _: None = Depends(require_admin_api_key),
 ) -> dict:
     status = body.get("review_status")
     if status not in ("approved", "rejected"):
@@ -83,6 +85,6 @@ async def review_response(
 
 
 @router.get("/feedback/gold")
-async def list_gold() -> dict:
+async def list_gold(_: None = Depends(require_admin_api_key)) -> dict:
     records = load_gold_entries()
     return {"gold": records, "total": len(records)}

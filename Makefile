@@ -1,6 +1,7 @@
-PYTHON   := dharmagpt/.venv/Scripts/python
-PYTEST   := $(PYTHON) -m pytest
+PYTHON ?= .venv/bin/python
+PYTEST ?= $(PYTHON) -m pytest
 PYTHONPATH_SET := PYTHONPATH=.
+PYTEST_INTEGRATION_ARGS ?=
 
 # ─── Test build steps ─────────────────────────────────────────────────────────
 
@@ -12,7 +13,7 @@ test-unit:
 ## Run full end-to-end integration tests (requires local Ollama)
 .PHONY: test-integration
 test-integration:
-	cd dharmagpt && $(PYTHONPATH_SET) $(PYTEST) tests/integration/ -v --timeout=120
+	cd dharmagpt && $(PYTHONPATH_SET) $(PYTEST) tests/integration/ -v $(PYTEST_INTEGRATION_ARGS)
 
 ## Run both unit and integration tests
 .PHONY: test-all

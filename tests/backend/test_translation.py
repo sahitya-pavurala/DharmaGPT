@@ -9,6 +9,7 @@ def test_translate_text_falls_back_on_rate_limit_to_ollama(monkeypatch):
         ollama_model="qwen-test",
         ollama_url="http://localhost:11434",
         indictrans2_model="indic-test",
+        local_first=False,
     )
 
     monkeypatch.setattr("core.translation._ollama_available", lambda *args, **kwargs: True)
@@ -36,6 +37,7 @@ def test_translate_text_reaches_indictrans2_after_remote_rate_limits(monkeypatch
         ollama_model="qwen-test",
         ollama_url="http://localhost:11434",
         indictrans2_model="indic-test",
+        local_first=False,
     )
 
     monkeypatch.setattr("core.translation._ollama_available", lambda *args, **kwargs: True)

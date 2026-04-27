@@ -4,14 +4,15 @@ import json
 import re
 import uuid
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from core import dataset_store
+from api.auth import require_admin_api_key
 from core.config import get_settings
 from core.local_vector_store import upsert_vectors
-from core.retrieval import get_openai, get_pinecone
+from core.retrieval import embed_texts_local, get_openai, get_pinecone
 
 router = APIRouter()
 settings = get_settings()
@@ -120,6 +121,7 @@ async def upload_document_to_vector_db(
   index_name: str = Form(""),
   namespace: str = Form(""),
   dataset_name: str = Form(""),
+  _: None = Depends(require_admin_api_key),
 ) -> dict:
   vector_db = (vector_db or "local").strip().lower()
   if vector_db not in {"local", "pinecone"}:
@@ -134,10 +136,6 @@ async def upload_document_to_vector_db(
   chunks = _chunk_text(text)
   if not chunks:
     raise HTTPException(status_code=400, detail="Could not extract usable text from uploaded file")
-
-  client = get_openai()
-  embed_response = await client.embeddings.create(model=settings.embedding_model, input=chunks)
-  vectors = [row.embedding for row in embed_response.data]
 
   if vector_db == "local":
     default_index = settings.local_vector_index_name
@@ -155,6 +153,17 @@ async def upload_document_to_vector_db(
   ds_id = dataset_name.strip()
   if ds_id:
     dataset_store.register(ds_id)
+
+  try:
+    client = get_openai()
+    embed_response = await client.embeddings.create(model=settings.embedding_model, input=chunks)
+    vectors = [row.embedding for row in embed_response.data]
+    embedding_backend = "openai"
+  except Exception as exc:
+    if vector_db != "local":
+      raise HTTPException(status_code=502, detail="Cloud embedding provider unavailable") from exc
+    vectors = embed_texts_local(chunks)
+    embedding_backend = "local_hash"
 
   records = []
   doc_id = uuid.uuid4().hex[:12]
@@ -201,6 +210,7 @@ async def upload_document_to_vector_db(
     "document": filename,
     "chunks_created": len(chunks),
     "vectors_upserted": upserted,
+    "embedding_backend": embedding_backend,
   }
 
 
@@ -342,6 +352,10 @@ def _feedback_page() -> str:
         <label for="docFile">Document File</label>
         <input id="docFile" type="file" />
       </div>
+      <div class="field" style="min-width: 220px;">
+        <label for="adminKey">Admin Key</label>
+        <input id="adminKey" type="password" placeholder="X-Admin-Key" />
+      </div>
       <button class="btn-primary" id="uploadBtn" style="margin-top: 18px;">Upload & Index</button>
     </div>
 
@@ -370,7 +384,20 @@ def _feedback_page() -> str:
     let pendingData = [];
     let goldData = [];
 
-    function headers() { return { "Content-Type": "application/json" }; }
+    const savedAdminKey = localStorage.getItem("dharmagpt.adminKey") || "";
+    document.getElementById("adminKey").value = savedAdminKey;
+
+    function adminKey() {
+      const key = document.getElementById("adminKey").value.trim();
+      if (key) localStorage.setItem("dharmagpt.adminKey", key);
+      return key;
+    }
+    function headers() {
+      const key = adminKey();
+      const h = { "Content-Type": "application/json" };
+      if (key) h["X-Admin-Key"] = key;
+      return h;
+    }
     function setNotice(msg, err=false) {
       const n = document.getElementById("notice");
       n.style.color = err ? "#fecaca" : "#dbeafe";
@@ -517,11 +544,17 @@ def _feedback_page() -> str:
       fd.append("vector_db", document.getElementById("vectorDb").value || "local");
       fd.append("index_name", document.getElementById("indexName").value || "");
       fd.append("namespace", document.getElementById("namespace").value || "");
+      const key = adminKey();
+      if (!key) {
+        setNotice("Enter the admin key before uploading.", true);
+        return;
+      }
 
       setNotice("Uploading and indexing document...");
       try {
         const resp = await fetch("/admin/vector/upload", {
           method: "POST",
+          headers: { "X-Admin-Key": key },
           body: fd,
         });
         if (!resp.ok) {

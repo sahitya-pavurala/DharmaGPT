@@ -1,4 +1,7 @@
 import structlog
+import hashlib
+import math
+import re
 from pinecone import Pinecone
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -12,6 +15,7 @@ settings = get_settings()
 
 _pc: Pinecone | None = None
 _openai: AsyncOpenAI | None = None
+_TOKEN_RE = re.compile(r"[\w\u0900-\u0d7f]+", re.UNICODE)
 
 
 def get_pinecone() -> Pinecone:
@@ -26,6 +30,30 @@ def get_openai() -> AsyncOpenAI:
     if _openai is None:
         _openai = AsyncOpenAI(api_key=settings.openai_api_key)
     return _openai
+
+
+def embed_text_local(text: str, dims: int | None = None) -> list[float]:
+    """Deterministic local embedding used when cloud embeddings are unavailable."""
+    dims = dims or settings.embedding_dims
+    vector = [0.0] * dims
+    tokens = _TOKEN_RE.findall(text.lower())
+    if not tokens:
+        tokens = [text.lower()]
+
+    for token in tokens:
+        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+        bucket = int.from_bytes(digest[:4], "big") % dims
+        sign = 1.0 if digest[4] & 1 else -1.0
+        vector[bucket] += sign
+
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0.0:
+        return vector
+    return [value / norm for value in vector]
+
+
+def embed_texts_local(texts: list[str], dims: int | None = None) -> list[list[float]]:
+    return [embed_text_local(text, dims=dims) for text in texts]
 
 
 def _source_text_from_metadata(meta: dict) -> str:
@@ -56,12 +84,18 @@ def _source_text_from_metadata(meta: dict) -> str:
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
 async def embed_query(text: str) -> list[float]:
-    client = get_openai()
-    response = await client.embeddings.create(
-        model=settings.embedding_model,
-        input=[text],
-    )
-    return response.data[0].embedding
+    try:
+        client = get_openai()
+        response = await client.embeddings.create(
+            model=settings.embedding_model,
+            input=[text],
+        )
+        return response.data[0].embedding
+    except Exception as exc:
+        if settings.vector_db_backend.lower() == "local":
+            log.warning("embedding_fallback_local", error=str(exc))
+            return embed_text_local(text)
+        raise
 
 
 async def retrieve(
@@ -147,7 +181,7 @@ async def retrieve(
             url=meta.get("url"),
         ))
 
-    log.info("retrieval_done", query=query[:60], results=len(chunks))
+    log.info("retrieval_done", backend="pinecone", query=query[:60], results=len(chunks))
     return chunks
 
 

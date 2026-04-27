@@ -35,13 +35,19 @@ dist/
 Thumbs.db
 
 # IDE
+.codex
 .vscode/
 .idea/
 *.swp
 
 # Logs
 *.log
+*.log.err
+*.err
 logs/
+
+# Local machine helpers
+run_batch.bat
 
 # Test artifacts
 .pytest_cache/
@@ -50,3 +56,8 @@ htmlcov/
 
 # Local docs (blog drafts, notes — not for repo)
 docs/
+
+# Local beta-server administration (sensitive server info)
+scripts/beta_*.sh
+scripts/reload_beta_from_main.sh
+scripts/setup_named_cloudflare_tunnel.sh

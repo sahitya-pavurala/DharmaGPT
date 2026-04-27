@@ -59,19 +59,15 @@ class Settings(BaseSettings):
 
     # STT backend: "sarvam" | "claude" | "indicwhisper" | "auto" (sarvam → claude → indicwhisper)
     stt_backend: str = "auto"
-    indicwhisper_model: str = "ai4bharat/whisper-medium-te"
+    indicwhisper_model: str = "openai/whisper-small"
 
     # Translation: when True, try local Ollama before cloud Anthropic in auto mode
     translation_local_first: bool = True
 
-    # Manual translation review API
-    manual_translation_api_key: str = ""
-    manual_translation_dataset_root: str = "knowledge/processed"
-    manual_translation_audit_log: str = "knowledge/audit/manual_translation_audit.jsonl"
-    manual_translation_allowed_datasets: str = ""
-
     # Admin / review API
     admin_api_key: str = ""
+    admin_operator_api_key: str = ""
+    staging_api_key: str = ""
 
     # RAG
     rag_top_k: int = 5
@@ -108,6 +104,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
 
 
 @lru_cache

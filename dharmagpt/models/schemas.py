@@ -78,9 +78,24 @@ class FeedbackRequest(BaseModel):
     note: Optional[str] = None
 
 
+class CorpusUploadResponse(BaseModel):
+    status: str
+    role: str
+    dataset_id: Optional[str] = None
+    file_path: str
+    records: int = 0
+    validation_errors: list[str] = Field(default_factory=list)
+    ingested: bool = False
+    vectors_written: int = 0
+
+
 class HealthResponse(BaseModel):
     status: str
     pinecone: bool
+    vector_backend: str = "pinecone"
+    vector_store: bool = False
     anthropic: bool
     sarvam: bool
     vector_name: str
+    llm_backend: str = "anthropic"
+    llm_local: bool = False

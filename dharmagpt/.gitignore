@@ -54,6 +54,10 @@ logs/
 # ── Pinecone / vector cache ───────────────────────────────────────────────────
 *.faiss
 *.pkl
+knowledge/vector_store/
+knowledge/backups/
+knowledge/uploads/
+knowledge/audit/
 
 # ── Large data files (commit schema + seed only) ─────────────────────────────
 knowledge/processed/**/*_audio_part*.jsonl

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import httpx
 import structlog
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from api.auth import require_staging_api_key
 from models.schemas import AudioTranscribeResponse
 from core import dataset_store
 from core.config import get_settings
@@ -280,6 +281,7 @@ async def transcribe_audio(
     section: str = Form(None),
     description: str = Form(None),
     dataset_name: str = Form(""),
+    _: None = Depends(require_staging_api_key),
 ) -> AudioTranscribeResponse:
     """
     Upload a Sanskrit/Hindi audio file (chanting, pravachanam, discourse).
