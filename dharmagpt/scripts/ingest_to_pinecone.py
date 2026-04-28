@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pinecone import Pinecone, ServerlessSpec
 
+from core.chunk_store import upsert_chunk
 from utils.naming import dataset_id_from_path, is_canonical_part_file
 
 load_dotenv()
@@ -152,12 +153,11 @@ def build_metadata(record: dict, dataset_id: str) -> dict:
         "characters": record.get("characters", []),
         "topics": record.get("topics", []),
         "text": text,
-        "text_preview": text[:500],
         "text_en": text_en,
-        "text_en_preview": text_en[:500],
-        "url": record.get("url", ""),
-        "has_telugu": bool(record.get("text_te", "").strip()),
         "has_english": bool(text_en.strip()),
+        "text_preview": text[:500],
+        "translated_text_preview": text_en[:500],
+        "url": record.get("url", ""),
         "dataset_id": dataset_id,
     }
     section = record.get("section") or record.get("kanda")
@@ -224,6 +224,19 @@ def ingest(files: list[Path], dry_run: bool = False, delete_index: bool = False)
     # Build Pinecone records
     pinecone_records = []
     for (record, _, dataset_id), vector in zip(records_list, vectors):
+        chunk_text = record["text"]
+        text_en = record.get("text_en") or record.get("text_en_model") or ""
+        upsert_chunk(
+            record["id"],
+            text=chunk_text,
+            translated_text=text_en,
+            metadata={
+                **record,
+                "dataset_id": dataset_id,
+                "text_preview": chunk_text[:500],
+                "translated_text_preview": text_en[:500],
+            },
+        )
         pinecone_records.append({
             "id": record["id"],
             "values": vector,

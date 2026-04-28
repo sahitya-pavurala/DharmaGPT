@@ -10,6 +10,24 @@ import pytest
 from models.schemas import QueryMode, QueryRequest, SourceChunk
 
 
+@pytest.fixture(autouse=True)
+def isolated_local_stores(tmp_path, monkeypatch):
+    """Keep tests off the developer's live Postgres/SQLite stores."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    from core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "database_url", "")
+
+    import core.dataset_store as dataset_store
+    import core.chunk_store as chunk_store
+    import core.insight_store as insight_store
+
+    monkeypatch.setattr(dataset_store, "_DB_PATH", tmp_path / "datasets.sqlite3")
+    monkeypatch.setattr(chunk_store, "STORE_DB_PATH", tmp_path / "chunk_store.sqlite3")
+    monkeypatch.setattr(insight_store, "STORE_DB_PATH", tmp_path / "insight_store.sqlite3")
+
+
 @pytest.fixture
 def sample_source():
     return SourceChunk(
