@@ -7,9 +7,10 @@ on:
   pull_request:
     branches:
       - main
+      - develop
+      - master
       - release
       - release/**
-      - master
 
 jobs:
   unit-tests:
@@ -48,7 +49,25 @@ jobs:
     name: Integration tests
     runs-on: ubuntu-latest
     needs: unit-tests
-    if: github.event_name == 'pull_request'
+    if: >-
+      (
+        github.event_name == 'push' &&
+        (
+          github.ref == 'refs/heads/develop' ||
+          github.ref == 'refs/heads/master' ||
+          github.ref == 'refs/heads/release' ||
+          startsWith(github.ref, 'refs/heads/release/')
+        )
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        (
+          github.base_ref == 'develop' ||
+          github.base_ref == 'master' ||
+          github.base_ref == 'release' ||
+          startsWith(github.base_ref, 'release/')
+        )
+      )
     env:
       OLLAMA_URL: http://127.0.0.1:11434
       OLLAMA_MODEL: qwen2.5:1.5b
@@ -114,8 +133,22 @@ jobs:
     runs-on: ubuntu-latest
     needs: unit-tests
     if: >-
-      github.event_name == 'pull_request' &&
-      (github.base_ref == 'main' || github.base_ref == 'release' || startsWith(github.base_ref, 'release/') || github.base_ref == 'master')
+      (
+        github.event_name == 'push' &&
+        (
+          github.ref == 'refs/heads/master' ||
+          github.ref == 'refs/heads/release' ||
+          startsWith(github.ref, 'refs/heads/release/')
+        )
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        (
+          github.base_ref == 'master' ||
+          github.base_ref == 'release' ||
+          startsWith(github.base_ref, 'release/')
+        )
+      )
 
     defaults:
       run:
@@ -150,8 +183,22 @@ jobs:
     runs-on: ubuntu-latest
     needs: unit-tests
     if: >-
-      (github.event_name == 'push' && (github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) ||
-      (github.event_name == 'pull_request' && (github.base_ref == 'release' || startsWith(github.base_ref, 'release/')))
+      (
+        github.event_name == 'push' &&
+        (
+          github.ref == 'refs/heads/master' ||
+          github.ref == 'refs/heads/release' ||
+          startsWith(github.ref, 'refs/heads/release/')
+        )
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        (
+          github.base_ref == 'master' ||
+          github.base_ref == 'release' ||
+          startsWith(github.base_ref, 'release/')
+        )
+      )
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -213,6 +260,24 @@ jobs:
       && (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped')
       && (needs.smoke-contract.result == 'success' || needs.smoke-contract.result == 'skipped')
       && (needs.evaluation.result == 'success' || needs.evaluation.result == 'skipped')
+      && (
+        (
+          github.event_name == 'push' &&
+          (
+            github.ref == 'refs/heads/master' ||
+            github.ref == 'refs/heads/release' ||
+            startsWith(github.ref, 'refs/heads/release/')
+          )
+        ) ||
+        (
+          github.event_name == 'pull_request' &&
+          (
+            github.base_ref == 'master' ||
+            github.base_ref == 'release' ||
+            startsWith(github.base_ref, 'release/')
+          )
+        )
+      )
 
     steps:
       - name: Check out repository
