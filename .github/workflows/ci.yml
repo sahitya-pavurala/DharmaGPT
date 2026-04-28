@@ -45,6 +45,7 @@ jobs:
     name: Integration tests
     runs-on: ubuntu-latest
     needs: unit-tests
+    if: github.event_name == 'pull_request'
     env:
       OLLAMA_URL: http://127.0.0.1:11434
       OLLAMA_MODEL: qwen2.5:1.5b
@@ -142,7 +143,12 @@ jobs:
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
-    needs: integration-tests
+    needs: [unit-tests, integration-tests, smoke-contract]
+    if: >-
+      always()
+      && needs.unit-tests.result == 'success'
+      && (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped')
+      && (needs.smoke-contract.result == 'success' || needs.smoke-contract.result == 'skipped')
 
     steps:
       - name: Check out repository
