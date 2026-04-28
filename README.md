@@ -139,27 +139,7 @@ The repo includes a server-rendered response review console at:
 
 - `GET /admin/feedback`
 
-It uses the feedback API and gold store to review upvoted responses, approve strong answers into the benchmark set, and inspect the current gold corpus.
-
-### Gold Store Workflow
-
-Approved feedback responses are promoted into a versioned gold store in the local SQLite datastore at `knowledge/stores/dharmagpt.sqlite3`.
-
-The gold store is intentionally separate from live serving:
-
-- `feedback_responses` stores raw feedback events
-- `gold_entries` stores approved benchmark answers
-- `gold_audit` records review and promotion history
-
-This keeps the live RAG path grounded only in retrieved source passages, while the gold store is reserved for evaluation, regression checks, and offline prompt tuning.
-
-To back up or export the store:
-
-```powershell
-python -m dharmagpt.scripts.gold_store_backup --export-jsonl
-```
-
-This creates a timestamped SQLite backup under `knowledge/stores/backups/` and a portable JSONL export of the approved gold entries.
+It supports the feedback review workflow used to improve answer quality over time, while keeping review data separate from live serving.
 
 ### Deployment
 
