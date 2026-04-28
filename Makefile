@@ -75,6 +75,33 @@ audio-vectorize:
 serve:
 	cd dharmagpt && $(PYTHONPATH_SET) uvicorn api.main:app --reload --port 8000
 
+# ─── Beta Docker server ───────────────────────────────────────────────────────
+
+## Start beta Docker stack
+.PHONY: beta-up
+beta-up:
+	./scripts/docker_beta_up.sh
+
+## Start/rebuild beta Docker stack
+.PHONY: beta-build
+beta-build:
+	./scripts/docker_beta_up.sh --build
+
+## Start beta Docker stack with Cloudflare tunnel
+.PHONY: beta-tunnel
+beta-tunnel:
+	./scripts/docker_beta_up.sh --tunnel
+
+## Stop beta Docker stack
+.PHONY: beta-down
+beta-down:
+	./scripts/docker_beta_down.sh
+
+## Back up beta Docker Postgres and knowledge files
+.PHONY: beta-backup
+beta-backup:
+	./scripts/docker_beta_backup.sh
+
 .PHONY: help
 help:
 	@grep -E '^##' Makefile | sed 's/## //'
