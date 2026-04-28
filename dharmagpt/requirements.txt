@@ -22,8 +22,8 @@ langchain-openai>=0.2.0
 langchain-ollama>=0.2.0          # optional: only needed for LLM_BACKEND=ollama
 
 # LLM + Embeddings (direct SDKs — still used for non-LC paths)
-anthropic==0.34.0
-openai==1.45.0
+anthropic==0.97.0
+openai==2.33.0
 
 # Vector DB
 pinecone==5.0.0
