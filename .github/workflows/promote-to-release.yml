@@ -1,9 +1,9 @@
-name: Promote main to release
+name: Promote master to release
 
 on:
   push:
     branches:
-      - main
+      - master
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const base = 'release';
-            const head = `${owner}:main`;
+            const head = `${owner}:master`;
 
             const existing = await github.paginate(github.rest.pulls.list, {
               owner,
@@ -43,13 +43,13 @@ jobs:
             const pr = await github.rest.pulls.create({
               owner,
               repo,
-              title: 'Promote main to release',
-              head: 'main',
+              title: 'Promote master to release',
+              head: 'master',
               base,
               body: [
-                'Automated promotion PR from `main` to `release`.',
+                'Automated promotion PR from `master` to `release`.',
                 '',
-                'Use this branch to stage the next production cut.',
+                'Use this branch to stage the next production cutover.',
               ].join('\n'),
             });
 
