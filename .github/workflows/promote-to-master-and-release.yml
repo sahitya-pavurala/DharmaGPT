@@ -1,0 +1,88 @@
+name: Promote release to master and publish release
+
+on:
+  push:
+    branches:
+      - release
+      - release/**
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Optional release tag name. Defaults to an auto-generated tag.
+        required: false
+        type: string
+      release_name:
+        description: Optional release title. Defaults to the tag name.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync-master-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync master to release
+        run: |
+          git fetch origin master release --tags
+          git push origin HEAD:master
+
+      - name: Create release tag
+        env:
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          if [ -n "${INPUT_TAG_NAME:-}" ]; then
+            TAG_NAME="$INPUT_TAG_NAME"
+          else
+            TAG_NAME="release-${GITHUB_RUN_ID}"
+          fi
+
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag already exists locally: $TAG_NAME"
+            exit 1
+          fi
+
+          git tag -a "$TAG_NAME" -m "Automated release $TAG_NAME"
+          git push origin "$TAG_NAME"
+
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub release
+        uses: actions/github-script@v7
+        env:
+          INPUT_RELEASE_NAME: ${{ inputs.release_name }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = process.env.TAG_NAME;
+            const releaseName = process.env.INPUT_RELEASE_NAME || tag;
+
+            const release = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              name: releaseName,
+              target_commitish: 'release',
+              draft: false,
+              prerelease: false,
+              body: [
+                `Automated release cut from \`release\` at ${process.env.GITHUB_SHA}.`,
+                '',
+                'The production branch \`master\` was synced to the same commit.',
+              ].join('\n'),
+            });
+
+            core.info(`Created GitHub release: ${release.data.html_url}`);

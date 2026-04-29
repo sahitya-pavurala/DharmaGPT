@@ -139,31 +139,11 @@ The repo includes a server-rendered response review console at:
 
 - `GET /admin/feedback`
 
-It uses the feedback API and gold store to review upvoted responses, approve strong answers into the benchmark set, and inspect the current gold corpus.
+It supports the feedback review workflow used to improve answer quality over time, while keeping review data separate from live serving.
 
-### Gold Store Workflow
+### Deployment
 
-Approved feedback responses are promoted into a versioned gold store in the local SQLite datastore at `knowledge/stores/dharmagpt.sqlite3`.
-
-The gold store is intentionally separate from live serving:
-
-- `feedback_responses` stores raw feedback events
-- `gold_entries` stores approved benchmark answers
-- `gold_audit` records review and promotion history
-
-This keeps the live RAG path grounded only in retrieved source passages, while the gold store is reserved for evaluation, regression checks, and offline prompt tuning.
-
-To back up or export the store:
-
-```powershell
-python -m dharmagpt.scripts.gold_store_backup --export-jsonl
-```
-
-This creates a timestamped SQLite backup under `knowledge/stores/backups/` and a portable JSONL export of the approved gold entries.
-
-### Team Server Deployment
-
-For an internal team server, the recommended setup is Docker Compose plus Nginx:
+The recommended production setup is Docker Compose plus Nginx:
 
 ```bash
 cp dharmagpt/.env.example dharmagpt/.env
@@ -179,8 +159,6 @@ The compose stack runs:
 
 - `app` on port `8000` inside the Docker network
 - `nginx` on port `80` for public access
-
-If your team should only access the tool internally, put the server behind VPN, a private subnet, or an identity-aware proxy.
 
 ### Query the API
 
@@ -278,7 +256,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Sources & Acknowledgements
 
-- **Valmiki Ramayana** — [valmikiramayan.net](https://www.valmikiramayan.net/) (K. M. K. Murthy translation)
+
 
 
 ---

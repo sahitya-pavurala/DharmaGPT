@@ -20,8 +20,11 @@ data/chunks/
 data/audio/
 downloads/
 scripts/scraper/
-*.jsonl
 *.transcript.json
+# Ignore generated/large JSONL data but not checked-in eval/seed files
+dharmagpt/knowledge/**/*.jsonl
+dharmagpt/evaluation/reports/*.jsonl
+data/**/*.jsonl
 
 # Node / Expo
 node_modules/
