@@ -56,21 +56,18 @@ class Settings(BaseSettings):
     rag_min_score: float = 0.35
     max_context_chars: int = 6000
 
-    # ── Evaluation judges ─────────────────────────────────────────────────────
-    # Both default to Claude Haiku — cheap (~$0.001/question), no extra infra.
-    # Override via EVALUATION_PRIMARY_* / EVALUATION_SECONDARY_* env vars.
-    # Falls back to anthropic_api_key when evaluation_primary/secondary_api_key is unset.
-    evaluation_primary_backend: str = "anthropic"
-    evaluation_primary_model: str = "claude-haiku-4-5-20251001"
+    # ── Evaluation judges (Sarvam models understand Telugu/Sanskrit) ──────────
+    evaluation_primary_backend: str = "openai"
+    evaluation_primary_model: str = "sarvamai/sarvam-m"
     evaluation_primary_api_key: str = ""
-    evaluation_primary_base_url: str = ""
-    evaluation_primary_timeout_sec: int = 60
+    evaluation_primary_base_url: str = "http://localhost:8000/v1"
+    evaluation_primary_timeout_sec: int = 120
 
-    evaluation_secondary_backend: str = "anthropic"
-    evaluation_secondary_model: str = "claude-haiku-4-5-20251001"
+    evaluation_secondary_backend: str = "openai"
+    evaluation_secondary_model: str = "sarvamai/sarvam-30b"
     evaluation_secondary_api_key: str = ""
-    evaluation_secondary_base_url: str = ""
-    evaluation_secondary_timeout_sec: int = 60
+    evaluation_secondary_base_url: str = "http://localhost:8000/v1"
+    evaluation_secondary_timeout_sec: int = 120
 
     # ── Admin / review API ────────────────────────────────────────────────────
     admin_api_key: str = ""

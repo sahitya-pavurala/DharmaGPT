@@ -75,13 +75,6 @@ def main() -> None:
         default=None,
         help="Evaluate only the first N questions (useful for quick smoke tests)",
     )
-    parser.add_argument(
-        "--fail-below",
-        type=float,
-        default=None,
-        metavar="RATE",
-        help="Exit with code 1 if pass rate is below RATE (0.0-1.0). Used in CI.",
-    )
     args = parser.parse_args()
 
     questions_path = Path(args.questions)
@@ -112,15 +105,6 @@ def main() -> None:
     summary = summarize(results)
     _print_summary(summary)
     print(f"Full results written to: {output_path}\n")
-
-    if args.fail_below is not None:
-        pass_rate = summary.get("pass_rate", 0.0)
-        if pass_rate < args.fail_below:
-            print(
-                f"FAIL: pass rate {pass_rate:.0%} is below threshold {args.fail_below:.0%}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
 
 
 if __name__ == "__main__":

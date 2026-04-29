@@ -4,12 +4,11 @@ response_scorer.py - score a DharmaGPT RAG response across quality dimensions.
 Entry point: validate_response(query, response) -> ValidationResult
 
 Default judge stack (configurable via .env):
-  claude-haiku-4-5 (primary)   -> answer_relevance, context_utilization
-  claude-haiku-4-5 (secondary) -> faithfulness, citation_precision
+  sarvamai/sarvam-m   (primary)   -> answer_relevance, context_utilization
+  sarvamai/sarvam-30b (secondary) -> faithfulness, citation_precision
 
-Both use the Anthropic backend by default. Falls back to ANTHROPIC_API_KEY.
-Override via EVALUATION_PRIMARY_* / EVALUATION_SECONDARY_* env vars, or pass
-judge_config to validate_response() — used in tests with local Ollama models.
+Both run via an OpenAI-compatible API (default: http://localhost:8000/v1).
+Override by passing judge_config to validate_response() — used in local model tests.
 
 Two rule-based metrics (free, no API call):
   retrieval stats -> cosine score mean/min, source count, section diversity
@@ -140,8 +139,8 @@ def _llm_config(role: str) -> LLMConfig:
     return LLMConfig(
         backend=LLMBackend(backend_name),
         model=model,
-        api_key=api_key or (settings.anthropic_api_key if backend_name == "anthropic" else ""),
-        base_url=base_url or "",
+        api_key=api_key,
+        base_url=base_url,
         timeout_sec=timeout_sec,
         max_tokens=1024,
     )
@@ -213,11 +212,11 @@ def validate_response(
     Score a RAG response across faithfulness, relevance, context use, and citation quality.
 
     Makes two judge LLM calls:
-      - primary   (claude-haiku-4-5): answer_relevance + context_utilization
-      - secondary (claude-haiku-4-5): faithfulness + citation_precision
+      - primary   (sarvamai/sarvam-m):   answer_relevance + context_utilization
+      - secondary (sarvamai/sarvam-30b): faithfulness + citation_precision
 
     Both calls use judge_config when provided (overrides both roles).
-    Pass an Ollama LLMConfig to score with a local model instead — no Anthropic key needed.
+    Pass an Ollama LLMConfig to score with a local model instead — no Sarvam server needed.
 
     Rule-based metrics (retrieval stats, mode compliance) are computed locally, no LLM.
 
