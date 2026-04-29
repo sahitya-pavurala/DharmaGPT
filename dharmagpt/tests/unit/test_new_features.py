@@ -121,6 +121,39 @@ def test_split_threshold_constant():
     assert _SEGMENT_SECS == 29
 
 
+def test_ollama_embedding_backend_batches_requests(monkeypatch):
+    from core.backends.embedding import OllamaEmbeddings
+
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[0.1, 0.2], [0.3, 0.4]]}
+
+    def fake_post(url, json, timeout):
+        calls.append((url, json, timeout))
+        return Response()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    embedder = OllamaEmbeddings(model="nomic-embed-text", base_url="http://localhost:11434/", dims=768)
+    vectors = embedder.embed_documents(["rama", "dharma"])
+
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+    assert calls == [
+        (
+            "http://localhost:11434/api/embed",
+            {"model": "nomic-embed-text", "input": ["rama", "dharma"]},
+            120,
+        )
+    ]
+
+
 @pytest.mark.asyncio
 async def test_small_file_skips_split():
     """Files under threshold go straight to _transcribe_audio without splitting."""

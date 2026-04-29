@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from models.schemas import HealthResponse
 from core.config import get_settings
+from core.backends.embedding import get_embedder
 from core.retrieval import get_pinecone
 from core.local_vector_store import healthcheck as local_vector_healthcheck
 import anthropic
@@ -21,6 +22,7 @@ async def health() -> HealthResponse:
     anthropic_ok = False
     sarvam_ok = False
     llm_ok = False
+    embedding_ok = False
 
     try:
         pc = get_pinecone()
@@ -63,14 +65,23 @@ async def health() -> HealthResponse:
     else:
         llm_ok = False
 
+    try:
+        vector = get_embedder().embed_query("health check")
+        embedding_ok = len(vector) == settings.embedding_dims
+    except Exception:
+        embedding_ok = False
+
     vector_ok = pinecone_ok
     vector_name = settings.pinecone_index_name
 
     return HealthResponse(
-        status="ok" if all([vector_ok, llm_ok]) else "degraded",
+        status="ok" if all([vector_ok, llm_ok, embedding_ok]) else "degraded",
         pinecone=pinecone_ok,
         vector_backend=settings.vector_db_backend,
         vector_store=vector_ok,
+        embedding_backend=settings.embedding_backend,
+        embedding_model=settings.embedding_model,
+        embedding=embedding_ok,
         anthropic=anthropic_ok,
         sarvam=sarvam_ok,
         vector_name=vector_name,
