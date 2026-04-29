@@ -154,6 +154,49 @@ def test_ollama_embedding_backend_batches_requests(monkeypatch):
     ]
 
 
+def test_openai_chat_backend_maps_messages(monkeypatch):
+    from core.backends.llm import OpenAIChatModel
+
+    captured = {}
+
+    class FakeMessage:
+        content = "answer text"
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return type("Response", (), {"choices": [FakeChoice()]})()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, api_key, timeout):
+            captured["api_key"] = api_key
+            captured["timeout"] = timeout
+            self.chat = FakeChat()
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+
+    model = OpenAIChatModel(model="gpt-4.1-mini", api_key="test-key", timeout=30)
+    response = model.invoke([
+        {"role": "system", "content": "Be precise."},
+        {"role": "user", "content": "What is dharma?"},
+    ])
+
+    assert response.content == "answer text"
+    assert captured["api_key"] == "test-key"
+    assert captured["timeout"] == 30
+    assert captured["model"] == "gpt-4.1-mini"
+    assert captured["messages"] == [
+        {"role": "system", "content": "Be precise."},
+        {"role": "user", "content": "What is dharma?"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_small_file_skips_split():
     """Files under threshold go straight to _transcribe_audio without splitting."""

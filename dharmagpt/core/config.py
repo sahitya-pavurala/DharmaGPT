@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-large"
     embedding_dims: int = 3072
 
-    # LLM_BACKEND: anthropic
+    # LLM_BACKEND: anthropic | openai | ollama
     llm_backend: str = "anthropic"
     anthropic_model: str = "claude-sonnet-4-20250514"
     llm_model: str | None = None       # override model name if needed
@@ -88,6 +88,8 @@ class Settings(BaseSettings):
             return self.llm_model
         if self.llm_backend.lower() == "ollama":
             return self.ollama_model
+        if self.llm_backend.lower() == "openai":
+            return "gpt-4.1-mini"
         return self.anthropic_model
 
     def evaluation_model_for(self, role: str) -> tuple[str, str, str, str, int]:

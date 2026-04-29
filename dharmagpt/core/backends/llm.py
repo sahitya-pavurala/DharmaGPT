@@ -1,11 +1,13 @@
 """
-LLM backend registry — powered by LangChain BaseChatModel.
+LLM backend registry.
 
 Default: anthropic  (LLM_BACKEND in .env)
 No fallback — if the configured backend fails, the exception propagates immediately.
 
 Supported values:
-  anthropic  — Claude via Anthropic API (default)
+  anthropic  — Claude via Anthropic API
+  openai     — OpenAI Chat Completions API
+  ollama     — local Ollama chat model
 """
 from __future__ import annotations
 
@@ -59,6 +61,39 @@ class OllamaChatModel:
         return _ChatResponse(content=((data.get("message") or {}).get("content") or "").strip())
 
 
+class OpenAIChatModel:
+    def __init__(self, model: str, api_key: str, timeout: int):
+        if not api_key:
+            raise RuntimeError("OpenAI backend selected but OPENAI_API_KEY is not set")
+        from openai import OpenAI
+
+        self._client = OpenAI(api_key=api_key, timeout=timeout)
+        self._model = model
+
+    def invoke(self, messages) -> _ChatResponse:
+        payload_messages = []
+        for message in messages:
+            if isinstance(message, dict):
+                role = message.get("role", "user")
+                content = message.get("content", "")
+            else:
+                role = getattr(message, "type", "") or getattr(message, "role", "") or "user"
+                content = getattr(message, "content", "")
+                if role == "human":
+                    role = "user"
+                elif role == "ai":
+                    role = "assistant"
+            payload_messages.append({"role": role, "content": content})
+
+        response = self._client.chat.completions.create(
+            model=self._model,
+            messages=payload_messages,
+            temperature=0.2,
+            max_tokens=1024,
+        )
+        return _ChatResponse(content=(response.choices[0].message.content or "").strip())
+
+
 @lru_cache(maxsize=1)
 def get_llm():
     """
@@ -74,9 +109,14 @@ def get_llm():
         log.info("llm_backend_loaded", backend="ollama", model=model)
         return OllamaChatModel(model=model, base_url=s.ollama_url, timeout=s.llm_timeout_sec)
 
+    if backend == "openai":
+        model = s.resolved_llm_model
+        log.info("llm_backend_loaded", backend="openai", model=model)
+        return OpenAIChatModel(model=model, api_key=s.openai_api_key, timeout=s.llm_timeout_sec)
+
     if backend != "anthropic":
         raise ValueError(
-            f"Unknown LLM_BACKEND: {backend!r}. Valid values: anthropic | ollama"
+            f"Unknown LLM_BACKEND: {backend!r}. Valid values: anthropic | openai | ollama"
         )
 
     try:

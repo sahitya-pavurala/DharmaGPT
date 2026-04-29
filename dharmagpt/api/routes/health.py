@@ -62,6 +62,16 @@ async def health() -> HealthResponse:
             llm_ok = False
     elif llm_backend == "anthropic":
         llm_ok = anthropic_ok
+    elif llm_backend == "openai":
+        if _has_real_key(settings.openai_api_key):
+            try:
+                from openai import OpenAI
+
+                client = OpenAI(api_key=settings.openai_api_key, timeout=5)
+                client.models.retrieve(settings.resolved_llm_model)
+                llm_ok = True
+            except Exception:
+                llm_ok = False
     else:
         llm_ok = False
 
