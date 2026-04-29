@@ -23,7 +23,6 @@ import json
 import os
 import sys
 import time
-from collections import Counter
 from pathlib import Path
 
 import structlog
@@ -85,10 +84,7 @@ def best_embed_text(record: dict) -> str:
 
 def build_metadata(record: dict) -> dict:
     meta = {
-        "text": record.get("text_en") or record.get("text_en_model") or record.get("text") or "",
-        "text_preview": (record.get("text") or "")[:500],
-        "text_en": record.get("text_en") or record.get("text_en_model") or "",
-        "text_en_preview": (record.get("text_en") or record.get("text_en_model") or "")[:500],
+        "text": record.get("text_en") or record.get("text") or "",
         "citation": record.get("citation") or "",
         "section": record.get("kanda") or record.get("section") or "",
         "source": record.get("source") or "",
@@ -97,9 +93,7 @@ def build_metadata(record: dict) -> dict:
         "url": record.get("url") or "",
         "tags": record.get("tags") or [],
         "characters": record.get("characters") or [],
-        "topics": record.get("topics") or [],
         "is_shloka": record.get("is_shloka") or False,
-        "has_english": bool((record.get("text_en") or record.get("text_en_model") or "").strip()),
     }
     # audio-specific
     for field in ("description", "speaker_type", "source_file",
@@ -107,42 +101,30 @@ def build_metadata(record: dict) -> dict:
         if record.get(field):
             meta[field] = record[field]
     # text-specific
-    for field in ("sarga", "kanda", "chapter", "verse", "verse_start", "verse_end"):
+    for field in ("sarga", "kanda", "verse_start", "verse_end"):
         if record.get(field) is not None:
             meta[field] = record[field]
     return meta
 
 
-def load_records(path: Path) -> tuple[list[dict], int]:
+def load_records(path: Path) -> list[dict]:
     records = []
-    parse_errors = 0
     with path.open(encoding="utf-8") as fh:
-        for line_no, line in enumerate(fh, 1):
+        for line in fh:
             line = line.strip()
             if not line:
                 continue
             try:
                 records.append(json.loads(line))
-            except json.JSONDecodeError as exc:
-                parse_errors += 1
-                log.warning("json_parse_error", file=str(path), line=line_no, error=str(exc))
-    return records, parse_errors
-
-
-def source_type_from_path(path: Path) -> str:
-    """Infer the source type from the first path component under processed/."""
-    try:
-        relative = path.relative_to(PROCESSED_DIR)
-    except ValueError:
-        return "unknown"
-    return relative.parts[0] if relative.parts else "unknown"
+            except json.JSONDecodeError:
+                pass
+    return records
 
 
 def discover_files(source_type_filter: str | None) -> list[Path]:
     files = sorted(PROCESSED_DIR.glob("**/*.jsonl"))
     if source_type_filter:
-        normalized_filter = source_type_filter.strip().lower()
-        files = [f for f in files if source_type_from_path(f) == normalized_filter]
+        files = [f for f in files if source_type_filter in str(f)]
     return files
 
 
@@ -160,10 +142,6 @@ def main() -> None:
 
     files = discover_files(args.source_type)
     if not files:
-        available = sorted({source_type_from_path(f) for f in PROCESSED_DIR.glob("**/*.jsonl")})
-        if args.source_type:
-            hint = f" Available source types: {', '.join(available) if available else 'none'}"
-            sys.exit(f"No JSONL files found under {PROCESSED_DIR} for source type '{args.source_type}'.{hint}")
         sys.exit(f"No JSONL files found under {PROCESSED_DIR}")
 
     client = None if args.dry_run else get_openai_client()
@@ -176,15 +154,11 @@ def main() -> None:
     print(f"Files: {len(files)} | Model: {model} ({dims}d) | Index: {index_name}/{namespace}")
     if not args.dry_run:
         print(f"Already in store: {len(existing_ids):,} records (will skip unless --force)")
-    source_counts = Counter(source_type_from_path(path) for path in files)
-    print("Source types:", ", ".join(f"{kind}={count}" for kind, count in sorted(source_counts.items())))
     print()
 
     total_embedded = 0
     total_skipped = 0
     total_failed = 0
-    total_parse_errors = 0
-    embedded_by_source = Counter()
 
     pending_texts: list[str] = []
     pending_records: list[dict] = []
@@ -217,13 +191,11 @@ def main() -> None:
         time.sleep(EMBED_DELAY)
 
     for path in files:
-        records, parse_errors = load_records(path)
-        total_parse_errors += parse_errors
+        records = load_records(path)
         if not records:
             continue
 
         file_new = 0
-        file_source_type = source_type_from_path(path)
         for record in records:
             if args.limit and (total_embedded + total_skipped + total_failed) >= args.limit:
                 break
@@ -256,7 +228,6 @@ def main() -> None:
 
         if file_new:
             print(f"  {path.relative_to(PROCESSED_DIR)}: +{file_new} new")
-            embedded_by_source[file_source_type] += file_new
 
     if not args.dry_run:
         flush()
@@ -268,12 +239,6 @@ def main() -> None:
     print(f"Skipped:   {total_skipped:,} (already in store or no text)")
     if total_failed:
         print(f"Failed:    {total_failed:,}")
-    if total_parse_errors:
-        print(f"Parse errors: {total_parse_errors:,}")
-    if embedded_by_source:
-        print("By source type:")
-        for source_type, count in sorted(embedded_by_source.items()):
-            print(f"  {source_type}: {count:,}")
 
 
 if __name__ == "__main__":
