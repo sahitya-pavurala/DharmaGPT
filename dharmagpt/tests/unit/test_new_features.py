@@ -213,29 +213,21 @@ async def test_failed_segment_is_skipped_others_succeed():
     assert result_data["transcript"] == "good text"
 
 
-# ── audio_chunker Pinecone indexing ───────────────────────────────────────────
+# ── audio_chunker Postgres staging ────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_chunker_routes_to_pinecone(monkeypatch):
-    """chunk_and_index upserts vectors to Pinecone."""
+async def test_chunker_stages_chunks_for_later_vector_sync(monkeypatch):
+    """chunk_and_index stores chunks as pending instead of calling Pinecone."""
     from core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "rag_backend", "pinecone")
     monkeypatch.setattr(settings, "vector_db_backend", "pinecone")
     monkeypatch.setattr(settings, "openai_api_key", "fake-key")
 
-    upserted = []
+    staged = []
 
-    mock_index = MagicMock()
-    mock_index.upsert.side_effect = lambda vectors: upserted.extend(vectors)
-    mock_pc = MagicMock()
-    mock_pc.Index.return_value = mock_index
-
-    async def fake_embed_texts(texts):
-        return [[0.1] * 10 for _ in texts], "test"
-
-    with patch("pipelines.audio_chunker.embed_texts", side_effect=fake_embed_texts), \
-         patch("pipelines.audio_chunker.get_pinecone", return_value=mock_pc):
+    with patch("pipelines.audio_chunker.upsert_chunk") as mock_upsert:
+        mock_upsert.side_effect = lambda chunk_id, **kwargs: staged.append((chunk_id, kwargs))
 
         from pipelines.audio_chunker import chunk_and_index
         transcript_data = {
@@ -252,31 +244,26 @@ async def test_chunker_routes_to_pinecone(monkeypatch):
         )
 
     assert result["chunks_created"] > 0
-    assert len(upserted) > 0
-    assert upserted[0]["metadata"]["dataset_id"] == "test-dataset"
+    assert result["vector_db"] == "postgres"
+    assert result["vectors_upserted"] == 0
+    assert len(staged) > 0
+    assert staged[0][1]["metadata"]["dataset_id"] == "test-dataset"
+    assert staged[0][1]["vector_status"] == "pending"
 
 
 @pytest.mark.asyncio
 async def test_chunker_stamps_dataset_id_on_metadata(monkeypatch):
-    """Every chunk must carry dataset_id in its Pinecone metadata."""
+    """Every staged chunk must carry dataset_id in its metadata."""
     from core.config import get_settings
     settings = get_settings()
     monkeypatch.setattr(settings, "rag_backend", "pinecone")
     monkeypatch.setattr(settings, "vector_db_backend", "pinecone")
     monkeypatch.setattr(settings, "openai_api_key", "fake-key")
 
-    stored_records = []
+    staged = []
 
-    mock_index = MagicMock()
-    mock_index.upsert.side_effect = lambda vectors: stored_records.extend(vectors)
-    mock_pc = MagicMock()
-    mock_pc.Index.return_value = mock_index
-
-    async def fake_embed_texts(texts):
-        return [[0.0] * 10 for _ in texts], "test"
-
-    with patch("pipelines.audio_chunker.embed_texts", side_effect=fake_embed_texts), \
-         patch("pipelines.audio_chunker.get_pinecone", return_value=mock_pc):
+    with patch("pipelines.audio_chunker.upsert_chunk") as mock_upsert:
+        mock_upsert.side_effect = lambda chunk_id, **kwargs: staged.append((chunk_id, kwargs))
 
         from pipelines.audio_chunker import chunk_and_index
         await chunk_and_index(
@@ -286,8 +273,8 @@ async def test_chunker_stamps_dataset_id_on_metadata(monkeypatch):
             dataset_id="my-dataset",
         )
 
-    for rec in stored_records:
-        assert rec["metadata"].get("dataset_id") == "my-dataset"
+    for _, kwargs in staged:
+        assert kwargs["metadata"].get("dataset_id") == "my-dataset"
 
 
 # ── retrieval dataset filtering ───────────────────────────────────────────────

@@ -8,17 +8,19 @@ from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from core import dataset_store
-from core.chunk_store import upsert_chunk
+from core.chunk_store import count_chunks_by_vector_status, upsert_chunk
 from api.auth import require_admin_api_key
 from core.config import get_settings
 from core.insight_store import record_ingestion_run
+from core.postgres_db import connect as pg_connect, ensure_schema as pg_ensure_schema, use_postgres
 from core.retrieval import embed_texts, get_pinecone
 from core.usage_stats import summarize_usage
+from core.vector_sync import sync_pending_chunks_to_pinecone
 
 router = APIRouter()
 settings = get_settings()
@@ -357,6 +359,180 @@ async def upload_document_to_vector_db(
     "source_file_path": source_file_path,
     "content_sha256": content_sha256,
   }
+
+
+@router.post("/admin/vector/sync")
+async def sync_pending_vectors(
+  limit: int = Query(100, ge=1, le=1000),
+  index_name: str = Query(""),
+  namespace: str = Query(""),
+  source: str = Query(""),
+  dataset_id: str = Query(""),
+  create_index: bool = Query(False),
+  _: None = Depends(require_admin_api_key),
+) -> dict:
+  try:
+    return await sync_pending_chunks_to_pinecone(
+      limit=limit,
+      index_name=index_name,
+      namespace=namespace,
+      source=source,
+      dataset_id=dataset_id,
+      create_index=create_index,
+    )
+  except Exception as exc:
+    raise HTTPException(status_code=502, detail=f"Vector sync failed: {str(exc)[:300]}") from exc
+
+
+@router.get("/admin/vector/status")
+async def vector_status(_: None = Depends(require_admin_api_key)) -> dict:
+  return {"vector_status": count_chunks_by_vector_status()}
+
+
+@router.get("/admin/monitor")
+async def admin_monitor(_: None = Depends(require_admin_api_key)) -> dict:
+  postgres: dict = {"configured": use_postgres(), "ok": False, "tables": {}, "chunk_status": [], "sources": []}
+  if use_postgres():
+    try:
+      with pg_connect() as conn:
+        pg_ensure_schema(conn)
+        for table in ("datasets", "chunk_store", "ingestion_runs", "query_runs"):
+          postgres["tables"][table] = conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+        postgres["chunk_status"] = [
+          dict(row)
+          for row in conn.execute(
+            """
+            SELECT vector_status, COUNT(*) AS count
+            FROM chunk_store
+            GROUP BY vector_status
+            ORDER BY vector_status
+            """
+          ).fetchall()
+        ]
+        postgres["sources"] = [
+          dict(row)
+          for row in conn.execute(
+            """
+            SELECT source, source_type, vector_status, COUNT(*) AS count
+            FROM chunk_store
+            GROUP BY source, source_type, vector_status
+            ORDER BY count DESC, source
+            LIMIT 50
+            """
+          ).fetchall()
+        ]
+        postgres["ok"] = True
+    except Exception as exc:
+      postgres["error"] = str(exc)[:500]
+
+  pinecone: dict = {
+    "configured": bool(settings.pinecone_api_key),
+    "ok": False,
+    "target_index": settings.pinecone_index_name,
+    "indexes": [],
+  }
+  if settings.pinecone_api_key:
+    try:
+      pc = get_pinecone()
+      indexes = []
+      for item in pc.list_indexes():
+        name = getattr(item, "name", None) or (item.get("name") if isinstance(item, dict) else str(item))
+        index_info = {"name": name}
+        if name == settings.pinecone_index_name:
+          try:
+            stats = pc.Index(name).describe_index_stats()
+            index_info["stats"] = stats.to_dict() if hasattr(stats, "to_dict") else dict(stats)
+          except Exception as exc:
+            index_info["stats_error"] = str(exc)[:500]
+        indexes.append(index_info)
+      pinecone["indexes"] = indexes
+      pinecone["ok"] = True
+    except Exception as exc:
+      pinecone["error"] = str(exc)[:500]
+
+  return {"postgres": postgres, "pinecone": pinecone}
+
+
+@router.get("/admin/chunks")
+async def list_admin_chunks(
+  limit: int = Query(25, ge=1, le=200),
+  source: str = Query(""),
+  vector_status: str = Query(""),
+  _: None = Depends(require_admin_api_key),
+) -> dict:
+  if not use_postgres():
+    return {"chunks": []}
+
+  filters: list[str] = []
+  params: list[object] = []
+  if source.strip():
+    filters.append("source = %s")
+    params.append(source.strip())
+  if vector_status.strip():
+    filters.append("vector_status = %s")
+    params.append(vector_status.strip())
+  where = "WHERE " + " AND ".join(filters) if filters else ""
+  with pg_connect() as conn:
+    pg_ensure_schema(conn)
+    rows = conn.execute(
+      f"""
+      SELECT
+        id, source, source_title, source_type, language, vector_status,
+        preview, translated_preview, created_at
+      FROM chunk_store
+      {where}
+      ORDER BY created_at DESC
+      LIMIT {limit}
+      """,
+      params,
+    ).fetchall()
+  return {"chunks": [dict(row) for row in rows]}
+
+
+@router.get("/admin/notifications")
+async def list_admin_notifications(
+  limit: int = Query(50, ge=1, le=200),
+  _: None = Depends(require_admin_api_key),
+) -> dict:
+  return {"notifications": dataset_store.list_notifications(limit=limit)}
+
+
+@router.delete("/admin/notifications")
+async def clear_admin_notifications(_: None = Depends(require_admin_api_key)) -> dict:
+  return {"deleted": dataset_store.clear_notifications()}
+
+
+@router.get("/admin/audio/jobs")
+async def list_audio_jobs(
+  limit: int = Query(10, ge=1, le=100),
+  _: None = Depends(require_admin_api_key),
+) -> dict:
+  if not use_postgres():
+    return {"jobs": []}
+  with pg_connect() as conn:
+    pg_ensure_schema(conn)
+    rows = conn.execute(
+      """
+      SELECT id, source, source_title, file_name, language, dataset_id, status,
+             chunks, vectors, transcription_mode, transcription_version, error,
+             metadata_json, started_at, finished_at
+      FROM ingestion_runs
+      WHERE kind = 'audio'
+      ORDER BY finished_at DESC
+      LIMIT %s
+      """,
+      (limit,),
+    ).fetchall()
+  jobs = []
+  for row in rows:
+    item = dict(row)
+    metadata = item.pop("metadata_json") or {}
+    try:
+      item["metadata"] = json.loads(metadata) if isinstance(metadata, str) else dict(metadata)
+    except Exception:
+      item["metadata"] = {}
+    jobs.append(item)
+  return {"jobs": jobs}
 
 
 def _feedback_page() -> str:
@@ -940,10 +1116,16 @@ def _admin_page() -> str:
     .metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
     .metric{background:rgba(2,6,23,.35);border:1px solid var(--line);border-radius:12px;padding:14px}
     .metric-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-    .metric-value{font-size:24px;font-weight:700;margin-top:4px}
-    .mini-list{display:grid;gap:8px}
-    .mini-item{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(148,163,184,.12);padding-bottom:7px;font-size:13px}
-    .divider{border:0;border-top:1px solid var(--line);margin:20px 0}
+	    .metric-value{font-size:24px;font-weight:700;margin-top:4px}
+	    .mini-list{display:grid;gap:8px}
+	    .mini-item{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(148,163,184,.12);padding-bottom:7px;font-size:13px}
+	    .progress-list{display:grid;gap:8px;margin-top:12px}
+	    .progress-step{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+	    .progress-dot{width:10px;height:10px;border-radius:50%;background:rgba(148,163,184,.35);flex:0 0 auto}
+	    .progress-step.active{color:#fde68a}.progress-step.active .progress-dot{background:#f59e0b;box-shadow:0 0 0 4px rgba(245,158,11,.16)}
+	    .progress-step.done{color:var(--greentext)}.progress-step.done .progress-dot{background:#22c55e}
+	    .progress-step.err{color:var(--redtext)}.progress-step.err .progress-dot{background:#ef4444}
+	    .divider{border:0;border-top:1px solid var(--line);margin:20px 0}
     @media(max-width:520px){
       .shell{padding:24px 14px}
       h1{font-size:26px;line-height:1.15}
@@ -1012,7 +1194,72 @@ def _admin_page() -> str:
       <div class="section-title">Latest Runs</div>
       <div id="stats-runs"><div class="empty">No runs loaded.</div></div>
     </div>
-  </div>
+	  </div>
+
+	  <!-- ── MONITOR ── -->
+	  <div class="pane" id="pane-monitor">
+	    <div class="card">
+	      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+	        <div class="section-title" style="margin:0">Postgres Checkpoint</div>
+	        <button class="btn-ghost btn-sm" onclick="loadMonitor()">Refresh</button>
+	      </div>
+	      <div id="monitor-postgres"><div class="empty">Loading…</div></div>
+	      <div class="notice" id="monitor-notice"></div>
+	    </div>
+	    <div class="card">
+	      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+	        <div class="section-title" style="margin:0">Audio Job Progress</div>
+	        <button class="btn-ghost btn-sm" onclick="loadAudioJobs()">Refresh Jobs</button>
+	      </div>
+	      <div id="monitor-audio-jobs"><div class="empty">Loading…</div></div>
+	      <div class="notice" id="audio-jobs-notice"></div>
+	    </div>
+	    <div class="card">
+	      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+	        <div class="section-title" style="margin:0">Recent Chunk Rows</div>
+	        <button class="btn-ghost btn-sm" onclick="loadChunks()">Refresh Rows</button>
+	      </div>
+	      <div class="row three">
+	        <div><label>Source Filter</label><input id="chunk-source-filter" type="text" placeholder="optional source id"/></div>
+	        <div><label>Status Filter</label>
+	          <select id="chunk-status-filter">
+	            <option value="">Any</option>
+	            <option value="pending">Pending</option>
+	            <option value="indexed">Indexed</option>
+	            <option value="error">Error</option>
+	          </select>
+	        </div>
+	        <div><label>Limit</label><input id="chunk-limit" type="number" min="1" max="200" value="25"/></div>
+	      </div>
+	      <div id="monitor-chunks"><div class="empty">Loading…</div></div>
+	      <div class="notice" id="chunks-notice"></div>
+	    </div>
+	    <div class="card">
+	      <div class="section-title">Pinecone Sync</div>
+	      <div class="row three">
+	        <div><label>Batch Limit</label><input id="sync-limit" type="number" min="1" max="1000" value="100"/></div>
+	        <div><label>Index Name</label><input id="sync-index" type="text" placeholder="default from .env"/></div>
+	        <div><label>Namespace</label><input id="sync-namespace" type="text" placeholder="optional"/></div>
+	      </div>
+	      <div style="display:flex;gap:8px;flex-wrap:wrap">
+	        <button class="btn-primary" onclick="syncVectors(false)">Sync Pending</button>
+	        <button class="btn-ghost" onclick="syncVectors(true)">Sync + Create Index</button>
+	      </div>
+	      <div class="notice" id="sync-notice"></div>
+	      <div id="monitor-pinecone" style="margin-top:16px"><div class="empty">Loading…</div></div>
+	    </div>
+	    <div class="card">
+	      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+	        <div class="section-title" style="margin:0">API Failure Notifications</div>
+	        <div style="display:flex;gap:8px;flex-wrap:wrap">
+	          <button class="btn-ghost btn-sm" onclick="loadNotifications()">Refresh</button>
+	          <button class="btn-red btn-sm" onclick="clearNotifications()">Clear</button>
+	        </div>
+	      </div>
+	      <div id="monitor-notifications"><div class="empty">Loading…</div></div>
+	      <div class="notice" id="notifications-notice"></div>
+	    </div>
+	  </div>
 
   <!-- ── UPLOAD ── -->
   <div class="pane" id="pane-upload">
@@ -1034,9 +1281,10 @@ def _admin_page() -> str:
         <div><label>Section (optional)</label><input id="au-section" type="text" placeholder="e.g. Bala Kanda"/></div>
         <div><label>Description (optional)</label><input id="au-desc" type="text" placeholder="e.g. Part 1 clip 42"/></div>
       </div>
-      <button class="btn-primary" onclick="uploadAudio()">Transcribe & Index</button>
-      <div class="notice" id="au-notice"></div>
-    </div>
+	      <button class="btn-primary" id="au-upload-btn" onclick="uploadAudio()">Transcribe & Stage</button>
+	      <div class="notice" id="au-notice"></div>
+	      <div class="progress-list" id="au-progress" style="display:none"></div>
+	    </div>
 
     <hr class="divider"/>
 
@@ -1130,10 +1378,11 @@ function showTab(name) {
   document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
   document.getElementById("pane-"+name).classList.add("active");
   if(name==="datasets") loadDatasets();
-  if(name==="sources") loadSources();
-  if(name==="stats") loadStats();
-  if(name==="gold") loadGold();
-}
+	  if(name==="sources") loadSources();
+	  if(name==="stats") loadStats();
+		  if(name==="monitor") { loadMonitor(); loadAudioJobs(); loadChunks(); loadNotifications(); }
+	  if(name==="gold") loadGold();
+	}
 
 function setNotice(id, msg, err=false) {
   const el = document.getElementById(id);
@@ -1291,26 +1540,281 @@ async function deleteDs(name) {
     setNotice("ds-notice", `Deleted ${name}${purge?" (vectors purged)":""}.`);
     loadDatasets();
   } catch(e){ setNotice("ds-notice","Error: "+e.message,true); }
-}
+	}
+
+	// ── Monitor ──────────────────────────────────────────────────────────────────
+	async function loadMonitor() {
+	  try {
+	    const r = await fetch("/admin/monitor", {headers: adminHeaders()});
+	    const d = await r.json();
+	    if(!r.ok) throw new Error(d.detail || r.statusText);
+	    renderMonitor(d);
+	    setNotice("monitor-notice","Loaded machine monitor.");
+	  } catch(e) {
+	    setNotice("monitor-notice","Load failed: "+e.message,true);
+	  }
+	}
+
+	async function loadChunks() {
+	  const qs = new URLSearchParams({
+	    limit: document.getElementById("chunk-limit")?.value || "25"
+	  });
+	  const source = document.getElementById("chunk-source-filter")?.value.trim();
+	  const status = document.getElementById("chunk-status-filter")?.value.trim();
+	  if(source) qs.set("source", source);
+	  if(status) qs.set("vector_status", status);
+	  try {
+	    const r = await fetch(`/admin/chunks?${qs.toString()}`, {headers: adminHeaders()});
+	    const d = await r.json();
+	    if(!r.ok) throw new Error(d.detail || r.statusText);
+	    renderChunks(d.chunks || []);
+	    setNotice("chunks-notice",`Loaded ${(d.chunks || []).length} row(s).`);
+	  } catch(e) {
+	    setNotice("chunks-notice","Load failed: "+e.message,true);
+	  }
+	}
+
+	function renderChunks(rows) {
+	  const el = document.getElementById("monitor-chunks");
+	  if(!rows.length) {
+	    el.innerHTML = '<div class="empty">No chunk rows match this filter.</div>';
+	    return;
+	  }
+	  el.innerHTML = '<table><thead><tr><th>Source</th><th>Status</th><th>Preview</th><th>Created</th></tr></thead><tbody>' +
+	    rows.map(r => `<tr>
+	      <td><strong>${esc(r.source_title || r.source || "-")}</strong><br/><span style="font-size:11px;color:var(--muted)">${esc(r.source || "")} · ${esc(r.source_type || "")} · ${esc(r.language || "")}</span></td>
+	      <td><span class="badge ${r.vector_status==="indexed"?"on":r.vector_status==="error"?"off":""}">${esc(r.vector_status || "-")}</span></td>
+	      <td style="max-width:460px;line-height:1.45">${esc(r.preview || "")}${r.translated_preview ? `<br/><span style="color:var(--muted)">${esc(r.translated_preview)}</span>` : ""}<br/><span style="font-size:11px;color:var(--muted)">${esc(r.id || "")}</span></td>
+	      <td>${r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</td>
+	    </tr>`).join("") + '</tbody></table>';
+	}
+
+	async function loadAudioJobs() {
+	  try {
+	    const r = await fetch("/admin/audio/jobs?limit=10", {headers: adminHeaders()});
+	    const d = await r.json();
+	    if(!r.ok) throw new Error(d.detail || r.statusText);
+	    renderAudioJobs(d.jobs || []);
+	    setNotice("audio-jobs-notice",`Loaded ${(d.jobs || []).length} audio job(s).`);
+	  } catch(e) {
+	    setNotice("audio-jobs-notice","Load failed: "+e.message,true);
+	  }
+	}
+
+	function renderAudioJobs(jobs) {
+	  const el = document.getElementById("monitor-audio-jobs");
+	  if(!jobs.length) {
+	    el.innerHTML = '<div class="empty">No audio jobs yet.</div>';
+	    return;
+	  }
+	  el.innerHTML = '<table><thead><tr><th>File</th><th>Status</th><th>Stage</th><th>Splits</th><th>Chunks</th><th>Updated</th></tr></thead><tbody>' +
+	    jobs.map(j => {
+	      const m = j.metadata || {};
+	      const total = Number(m.segments_total || 0);
+	      const done = Number(m.segments_done || 0);
+	      const failed = Number(m.segments_failed || 0);
+	      const pct = total ? Math.round((done / total) * 100) : 0;
+	      const splitText = total ? `${done}/${total} (${pct}%)${failed ? " · failed " + failed : ""}` : "-";
+	      return `<tr>
+	        <td><strong>${esc(j.source_title || j.file_name || "-")}</strong><br/><span style="font-size:11px;color:var(--muted)">${esc(j.file_name || "")}</span></td>
+	        <td><span class="badge ${j.status==="ok"?"on":j.status==="failed"?"off":""}">${esc(j.status || "-")}</span></td>
+	        <td>${esc(m.stage || "-")}${m.last_error ? `<br/><span style="font-size:11px;color:var(--redtext)">${esc(m.last_error)}</span>` : ""}</td>
+	        <td>${splitText}</td>
+	        <td>${j.chunks || 0}</td>
+	        <td>${j.finished_at ? new Date(j.finished_at).toLocaleString() : "-"}</td>
+	      </tr>`;
+	    }).join("") + '</tbody></table>';
+	}
+
+	async function loadNotifications() {
+	  try {
+	    const r = await fetch("/admin/notifications?limit=50", {headers: adminHeaders()});
+	    const d = await r.json();
+	    if(!r.ok) throw new Error(d.detail || r.statusText);
+	    renderNotifications(d.notifications || []);
+	    setNotice("notifications-notice",`Loaded ${(d.notifications || []).length} notification(s).`);
+	  } catch(e) {
+	    setNotice("notifications-notice","Load failed: "+e.message,true);
+	  }
+	}
+
+	function renderNotifications(rows) {
+	  const el = document.getElementById("monitor-notifications");
+	  if(!rows.length) {
+	    el.innerHTML = '<div class="empty">No API failures recorded.</div>';
+	    return;
+	  }
+	  el.innerHTML = '<table><thead><tr><th>Level</th><th>Event</th><th>File</th><th>Detail</th><th>When</th></tr></thead><tbody>' +
+	    rows.map(n => `<tr>
+	      <td><span class="badge ${n.level==="error"?"off":"on"}">${esc(n.level || "-")}</span></td>
+	      <td>${esc(n.event || "-")}</td>
+	      <td style="overflow-wrap:anywhere">${esc(n.file_name || "-")}</td>
+	      <td style="max-width:420px;overflow-wrap:anywhere">${esc(n.detail || "")}</td>
+	      <td>${n.created_at ? new Date(n.created_at).toLocaleString() : "-"}</td>
+	    </tr>`).join("") + '</tbody></table>';
+	}
+
+	async function clearNotifications() {
+	  try {
+	    const r = await fetch("/admin/notifications", {method:"DELETE", headers: adminHeaders()});
+	    const d = await r.json();
+	    if(!r.ok) throw new Error(d.detail || r.statusText);
+	    setNotice("notifications-notice",`Cleared ${d.deleted || 0} notification(s).`);
+	    loadNotifications();
+	  } catch(e) {
+	    setNotice("notifications-notice","Clear failed: "+e.message,true);
+	  }
+	}
+
+	const AUDIO_STEPS = [
+	  ["upload", "Uploading audio to server"],
+	  ["transcribe", "Transcribing speech"],
+	  ["translate", "Translating transcript when needed"],
+	  ["stage", "Writing chunks to Postgres"],
+	  ["done", "Ready for Pinecone sync"]
+	];
+
+	function renderAudioProgress(activeKey, doneKeys=[], errorKey="") {
+	  const el = document.getElementById("au-progress");
+	  el.style.display = "grid";
+	  el.innerHTML = AUDIO_STEPS.map(([key,label]) => {
+	    const cls = errorKey === key ? "err" : doneKeys.includes(key) ? "done" : activeKey === key ? "active" : "";
+	    return `<div class="progress-step ${cls}"><span class="progress-dot"></span><span>${esc(label)}</span></div>`;
+	  }).join("");
+	}
+
+	function resetAudioProgress() {
+	  const el = document.getElementById("au-progress");
+	  el.style.display = "none";
+	  el.innerHTML = "";
+	}
+
+	function statusList(rows) {
+	  if(!rows || !rows.length) return '<div class="empty" style="padding:16px">No rows.</div>';
+	  return '<div class="mini-list">' + rows.map(x =>
+	    `<div class="mini-item"><span>${esc(x.vector_status || x.name || "-")}</span><strong>${esc(x.count || 0)}</strong></div>`
+	  ).join("") + '</div>';
+	}
+
+	function renderMonitor(d) {
+	  const pg = d.postgres || {};
+	  const pc = d.pinecone || {};
+	  const tables = pg.tables || {};
+	  document.getElementById("monitor-postgres").innerHTML = `
+	    <div class="metric-grid">
+	      <div class="metric"><div class="metric-label">Postgres</div><div class="metric-value">${pg.ok ? "OK" : "Down"}</div></div>
+	      <div class="metric"><div class="metric-label">Chunks</div><div class="metric-value">${tables.chunk_store || 0}</div></div>
+	      <div class="metric"><div class="metric-label">Datasets</div><div class="metric-value">${tables.datasets || 0}</div></div>
+	      <div class="metric"><div class="metric-label">Runs</div><div class="metric-value">${tables.ingestion_runs || 0}</div></div>
+	    </div>
+	    <div class="row two">
+	      <div><div class="section-title">Vector Status</div>${statusList(pg.chunk_status || [])}</div>
+	      <div><div class="section-title">Checkpoint Sources</div>${renderMonitorSources(pg.sources || [])}</div>
+	    </div>
+	    ${pg.error ? `<div class="notice err">${esc(pg.error)}</div>` : ""}`;
+
+	  document.getElementById("monitor-pinecone").innerHTML = `
+	    <div class="metric-grid">
+	      <div class="metric"><div class="metric-label">Pinecone</div><div class="metric-value">${pc.ok ? "OK" : "Down"}</div></div>
+	      <div class="metric"><div class="metric-label">Target Index</div><div class="metric-value" style="font-size:18px;overflow-wrap:anywhere">${esc(pc.target_index || "-")}</div></div>
+	      <div class="metric"><div class="metric-label">Indexes</div><div class="metric-value">${(pc.indexes || []).length}</div></div>
+	    </div>
+	    ${renderPineconeIndexes(pc.indexes || [], pc.target_index)}
+	    ${pc.error ? `<div class="notice err">${esc(pc.error)}</div>` : ""}`;
+	}
+
+	function renderMonitorSources(rows) {
+	  if(!rows.length) return '<div class="empty" style="padding:16px">No checkpoint rows.</div>';
+	  return '<table><thead><tr><th>Source</th><th>Type</th><th>Status</th><th>Rows</th></tr></thead><tbody>' +
+	    rows.map(r => `<tr>
+	      <td>${esc(r.source || "(blank)")}</td>
+	      <td>${esc(r.source_type || "-")}</td>
+	      <td>${esc(r.vector_status || "-")}</td>
+	      <td>${r.count || 0}</td>
+	    </tr>`).join("") + '</tbody></table>';
+	}
+
+	function renderPineconeIndexes(indexes, target) {
+	  if(!indexes.length) return '<div class="empty">No Pinecone indexes visible for the configured API key.</div>';
+	  return '<table><thead><tr><th>Index</th><th>Vectors</th><th>Namespaces</th><th>Status</th></tr></thead><tbody>' +
+	    indexes.map(i => {
+	      const stats = i.stats || {};
+	      const ns = stats.namespaces ? Object.keys(stats.namespaces).join(", ") : "-";
+	      return `<tr>
+	        <td><strong>${esc(i.name)}</strong>${i.name===target?' <span class="badge on">Target</span>':''}</td>
+	        <td>${stats.total_vector_count ?? "-"}</td>
+	        <td>${esc(ns)}</td>
+	        <td>${i.stats_error ? '<span class="badge off">Stats error</span>' : '<span class="badge on">Visible</span>'}</td>
+	      </tr>`;
+	    }).join("") + '</tbody></table>';
+	}
+
+	async function syncVectors(createIndex) {
+	  const limit = document.getElementById("sync-limit").value || "100";
+	  const indexName = document.getElementById("sync-index").value.trim();
+	  const namespace = document.getElementById("sync-namespace").value.trim();
+	  const qs = new URLSearchParams({limit, create_index: createIndex ? "true" : "false"});
+	  if(indexName) qs.set("index_name", indexName);
+	  if(namespace) qs.set("namespace", namespace);
+	  setNotice("sync-notice","Syncing pending chunks…");
+	  try {
+	    const r = await fetch(`/admin/vector/sync?${qs.toString()}`, {method:"POST", headers: adminHeaders()});
+	    const d = await r.json();
+	    if(!r.ok) throw new Error(d.detail || r.statusText);
+	    setNotice("sync-notice",`Synced ${d.vectors_upserted || 0} vector(s); selected ${d.selected || 0}.`);
+	    loadMonitor();
+	  } catch(e) {
+	    setNotice("sync-notice","Sync failed: "+e.message,true);
+	    loadMonitor();
+	  }
+	}
 
 // ── Audio upload ──────────────────────────────────────────────────────────────
 async function uploadAudio() {
   const file = document.getElementById("au-file").files?.[0];
   if(!file){ setNotice("au-notice","Choose an audio file first.",true); return; }
+  const btn = document.getElementById("au-upload-btn");
   const fd = new FormData();
   fd.append("file", file);
   fd.append("language_code", document.getElementById("au-lang").value);
   fd.append("dataset_name", document.getElementById("au-dataset").value.trim());
   fd.append("section", document.getElementById("au-section").value.trim());
   fd.append("description", document.getElementById("au-desc").value.trim() || file.name);
-  setNotice("au-notice","Transcribing and indexing… this may take 30–90s.");
+  const done = [];
+  btn.disabled = true;
+  btn.textContent = "Working…";
+  setNotice("au-notice","Uploading audio…");
+  renderAudioProgress("upload", done);
+  const progressTimer = setInterval(() => {
+    const states = [
+      ["transcribe", ["upload"], "Audio uploaded. Transcribing speech…"],
+      ["translate", ["upload","transcribe"], "Transcript received. Translating when needed…"],
+      ["stage", ["upload","transcribe","translate"], "Preparing chunks and writing to Postgres…"]
+    ];
+    const elapsed = Date.now() - startedAt;
+    const idx = elapsed > 45000 ? 2 : elapsed > 12000 ? 1 : elapsed > 2500 ? 0 : -1;
+    if(idx >= 0) {
+      renderAudioProgress(states[idx][0], states[idx][1]);
+      setNotice("au-notice", states[idx][2]);
+    }
+  }, 1200);
+  const startedAt = Date.now();
   try {
     const r = await fetch(`${API}/audio/transcribe`, {method:"POST", headers:adminHeaders(), body:fd});
     if(!r.ok){ const b=await r.json(); throw new Error(b.detail||r.statusText); }
     const d = await r.json();
-    setNotice("au-notice",`Done. ${d.chunks_created} chunks indexed. Translation: ${d.translation_backend||"none"}.`);
-    showTab("datasets");
-  } catch(e){ setNotice("au-notice","Error: "+e.message,true); }
+    clearInterval(progressTimer);
+    renderAudioProgress("done", ["upload","transcribe","translate","stage","done"]);
+    setNotice("au-notice",`Done. ${d.chunks_created} chunks staged in Postgres. Translation: ${d.translation_backend||"none"}.`);
+    showTab("monitor");
+  } catch(e){
+    clearInterval(progressTimer);
+    renderAudioProgress("", done, "transcribe");
+    setNotice("au-notice","Error: "+e.message,true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Transcribe & Stage";
+  }
 }
 
 // ── Doc upload ────────────────────────────────────────────────────────────────

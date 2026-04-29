@@ -2,7 +2,7 @@
 audio_chunker.py
 Receives Sarvam STT transcript (with word timestamps + diarization),
 applies pause-boundary chunking, translates chunks in parallel when needed,
-and upserts enriched chunks to the configured vector DB.
+and stores enriched chunks in Postgres for later incremental vector sync.
 
 All backends pluggable via .env:
   TRANSLATION_BACKEND = sarvam | anthropic | ollama | indictrans2 | skip
@@ -18,8 +18,7 @@ import uuid
 import structlog
 
 from core.config import get_settings
-from core.local_vector_store import upsert_vectors
-from core.retrieval import embed_texts, get_pinecone
+from core.chunk_store import upsert_chunk
 from core.backends.translation import get_translator
 
 log = structlog.get_logger()
@@ -158,7 +157,7 @@ async def chunk_and_index(
     file_metadata: dict,
     dataset_id: str = "",
 ) -> dict:
-    """Main entry: chunk -> translate -> embed -> upsert to configured vector DB."""
+    """Main entry: chunk -> translate -> store chunks for later vector sync."""
     words = transcript_data.get("words", [])
     raw_text = transcript_data.get("transcript", "")
 
@@ -199,21 +198,9 @@ async def chunk_and_index(
     )
     stem = filename.rsplit(".", 1)[0]
 
-    # Concatenate original + translation for richer embeddings
-    texts = [
-        f"{chunk['text']} | {translated.strip()}" if translated.strip() else chunk["text"]
-        for chunk, translated in zip(raw_chunks, translated_chunks)
-    ]
-
-    try:
-        vectors, embedding_backend = await embed_texts(texts)
-    except Exception as exc:
-        log.warning("audio_indexing_skipped", file=filename, reason=str(exc))
-        vectors = []
-        embedding_backend = None
-
-    records = []
-    for i, (chunk, vec, translated) in enumerate(zip(raw_chunks, vectors, translated_chunks)):
+    stored = 0
+    for i, (chunk, translated) in enumerate(zip(raw_chunks, translated_chunks)):
+        chunk_id = f"audio_{stem}_{uuid.uuid4().hex[:8]}_{i:04d}"
         record_metadata = {
             "source_type": "audio",
             "source_file": filename,
@@ -237,7 +224,7 @@ async def chunk_and_index(
             "translation_version": provenance["translation_version"] or "",
             "translation_fallback_reason": provenance["translation_fallback_reason"] or "",
             "translation_attempted_backends": provenance["translation_attempted_backends"] or [],
-            "embedding_backend": embedding_backend or "",
+            "embedding_backend": "",
         }
         if dataset_id:
             record_metadata["dataset_id"] = dataset_id
@@ -245,28 +232,14 @@ async def chunk_and_index(
             record_metadata["translated_text"] = translated.strip()
             record_metadata["translated_text_preview"] = translated[:300]
 
-        records.append({
-            "id": f"audio_{stem}_{uuid.uuid4().hex[:8]}_{i:04d}",
-            "values": vec,
-            "metadata": record_metadata,
-        })
-
-    vector_db = (settings.rag_backend or settings.vector_db_backend or "local").lower()
-    upserted = 0
-    if records:
-        batch_size = 100
-        if vector_db == "local":
-            upserted = upsert_vectors(
-                index_name=settings.local_vector_index_name,
-                namespace=settings.local_vector_namespace,
-                records=records,
-            )
-        else:
-            index = get_pinecone().Index(settings.pinecone_index_name)
-            for i in range(0, len(records), batch_size):
-                batch = records[i: i + batch_size]
-                index.upsert(vectors=batch)
-                upserted += len(batch)
+        upsert_chunk(
+            chunk_id,
+            text=chunk["text"],
+            translated_text=translated.strip(),
+            metadata=record_metadata,
+            vector_status="pending",
+        )
+        stored += 1
 
     translated_transcript = (
         "\n".join(t for t in translated_chunks if t.strip()) if needs_translation else None
@@ -275,10 +248,10 @@ async def chunk_and_index(
         "audio_indexed",
         file=filename,
         chunks=len(raw_chunks),
-        vector_db=vector_db,
-        vectors=upserted,
+        vector_db="postgres",
+        vectors=0,
         translation_backend=provenance["translation_backend"],
-        embedding_backend=embedding_backend,
+        chunks_stored=stored,
     )
     return {
         "chunks_created": len(raw_chunks),
@@ -288,7 +261,8 @@ async def chunk_and_index(
         "translation_version": provenance["translation_version"],
         "translation_fallback_reason": provenance["translation_fallback_reason"],
         "translation_attempted_backends": provenance["translation_attempted_backends"],
-        "vector_db": vector_db,
-        "vectors_upserted": upserted,
-        "embedding_backend": embedding_backend,
+        "vector_db": "postgres",
+        "vectors_upserted": 0,
+        "vector_status": "pending",
+        "embedding_backend": "",
     }

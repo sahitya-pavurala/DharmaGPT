@@ -50,11 +50,33 @@ def _init_sqlite(conn: sqlite3.Connection) -> None:
             preview TEXT,
             translated_preview TEXT,
             metadata_json TEXT,
+            vector_status TEXT NOT NULL DEFAULT 'pending',
+            vector_index TEXT NOT NULL DEFAULT '',
+            vector_namespace TEXT NOT NULL DEFAULT '',
+            vector_error TEXT NOT NULL DEFAULT '',
+            vector_updated_at TEXT,
             created_at TEXT NOT NULL
         )
         """
     )
+    _ensure_sqlite_column(conn, "chunk_store", "vector_status", "TEXT NOT NULL DEFAULT 'pending'")
+    _ensure_sqlite_column(conn, "chunk_store", "vector_index", "TEXT NOT NULL DEFAULT ''")
+    _ensure_sqlite_column(conn, "chunk_store", "vector_namespace", "TEXT NOT NULL DEFAULT ''")
+    _ensure_sqlite_column(conn, "chunk_store", "vector_error", "TEXT NOT NULL DEFAULT ''")
+    _ensure_sqlite_column(conn, "chunk_store", "vector_updated_at", "TEXT")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chunk_store_vector_status
+        ON chunk_store(vector_status, created_at)
+        """
+    )
     conn.commit()
+
+
+def _ensure_sqlite_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _connect():
@@ -72,6 +94,7 @@ def upsert_chunk(
     text: str,
     translated_text: str = "",
     metadata: dict | None = None,
+    vector_status: str = "pending",
 ) -> None:
     meta = metadata or {}
     chapter_raw = meta.get("chapter") or meta.get("sarga")
@@ -96,8 +119,8 @@ def upsert_chunk(
                     id, text, translated_text, source, source_title, source_type, citation,
                     section, chapter, verse, language, url, dataset_id, start_time_sec,
                     end_time_sec, speaker_type, word_count, preview, translated_preview,
-                    metadata_json, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    metadata_json, vector_status, vector_error, vector_updated_at, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, '', NULL, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     text = EXCLUDED.text,
                     translated_text = EXCLUDED.translated_text,
@@ -118,6 +141,9 @@ def upsert_chunk(
                     preview = EXCLUDED.preview,
                     translated_preview = EXCLUDED.translated_preview,
                     metadata_json = EXCLUDED.metadata_json,
+                    vector_status = EXCLUDED.vector_status,
+                    vector_error = EXCLUDED.vector_error,
+                    vector_updated_at = EXCLUDED.vector_updated_at,
                     created_at = EXCLUDED.created_at
                 """,
                 (
@@ -141,6 +167,7 @@ def upsert_chunk(
                     str(meta.get("text_preview") or text[:500]),
                     str(meta.get("translated_preview") or (translated_text[:500] if translated_text else "")),
                     json.dumps(meta, ensure_ascii=False),
+                    vector_status,
                     now,
                 ),
             )
@@ -151,8 +178,8 @@ def upsert_chunk(
                     id, text, translated_text, source, source_title, source_type, citation,
                     section, chapter, verse, language, url, dataset_id, start_time_sec,
                     end_time_sec, speaker_type, word_count, preview, translated_preview,
-                    metadata_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    metadata_json, vector_status, vector_error, vector_updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?)
                 """,
                 (
                     chunk_id,
@@ -175,10 +202,93 @@ def upsert_chunk(
                     str(meta.get("text_preview") or text[:500]),
                     str(meta.get("translated_preview") or (translated_text[:500] if translated_text else "")),
                     json.dumps(meta, ensure_ascii=False),
+                    vector_status,
                     now,
                 ),
             )
             conn.commit()
+
+
+def list_pending_chunks(limit: int = 100, *, source: str = "", dataset_id: str = "") -> list[dict]:
+    safe_limit = max(1, min(int(limit or 100), 1000))
+    filters = ["vector_status != 'indexed'"]
+    params: list[object] = []
+    placeholder = "%s" if use_postgres() else "?"
+    if source:
+        filters.append(f"source = {placeholder}")
+        params.append(source)
+    if dataset_id:
+        filters.append(f"dataset_id = {placeholder}")
+        params.append(dataset_id)
+
+    query = f"""
+        SELECT * FROM chunk_store
+        WHERE {' AND '.join(filters)}
+        ORDER BY created_at ASC
+        LIMIT {safe_limit}
+    """
+    with _connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_row_to_chunk(row) for row in rows]
+
+
+def mark_chunks_indexed(
+    chunk_ids: list[str],
+    *,
+    index_name: str,
+    namespace: str = "",
+) -> None:
+    ids = [chunk_id for chunk_id in chunk_ids if chunk_id]
+    if not ids:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    placeholder = "%s" if use_postgres() else "?"
+    placeholders = ",".join(placeholder for _ in ids)
+    with _connect() as conn:
+        conn.execute(
+            f"""
+            UPDATE chunk_store
+            SET vector_status = {placeholder},
+                vector_index = {placeholder},
+                vector_namespace = {placeholder},
+                vector_error = '',
+                vector_updated_at = {placeholder}
+            WHERE id IN ({placeholders})
+            """,
+            ["indexed", index_name, namespace, now, *ids],
+        )
+        if not use_postgres():
+            conn.commit()
+
+
+def mark_chunks_vector_error(chunk_ids: list[str], error: str) -> None:
+    ids = [chunk_id for chunk_id in chunk_ids if chunk_id]
+    if not ids:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    placeholder = "%s" if use_postgres() else "?"
+    placeholders = ",".join(placeholder for _ in ids)
+    with _connect() as conn:
+        conn.execute(
+            f"""
+            UPDATE chunk_store
+            SET vector_status = {placeholder},
+                vector_error = {placeholder},
+                vector_updated_at = {placeholder}
+            WHERE id IN ({placeholders})
+            """,
+            ["error", error[:1000], now, *ids],
+        )
+        if not use_postgres():
+            conn.commit()
+
+
+def count_chunks_by_vector_status() -> dict[str, int]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT vector_status, COUNT(*) AS count FROM chunk_store GROUP BY vector_status"
+        ).fetchall()
+    return {str(row["vector_status"] or "unknown"): int(row["count"] or 0) for row in rows}
 
 
 def fetch_chunks(chunk_ids: list[str]) -> dict[str, dict]:
@@ -195,30 +305,40 @@ def fetch_chunks(chunk_ids: list[str]) -> dict[str, dict]:
 
     result: dict[str, dict] = {}
     for row in rows:
-        try:
-            meta = json.loads(row["metadata_json"] or "{}")
-        except Exception:
-            meta = {}
-        result[row["id"]] = {
-            "id": row["id"],
-            "text": row["text"],
-            "translated_text": row["translated_text"] or "",
-            "source": row["source"] or meta.get("source") or "",
-            "source_title": row["source_title"] or meta.get("source_title") or "",
-            "source_type": row["source_type"] or meta.get("source_type") or "text",
-            "citation": row["citation"] or meta.get("citation") or "",
-            "section": row["section"] or meta.get("section") or meta.get("kanda") or "",
-            "chapter": row["chapter"] if row["chapter"] is not None else meta.get("chapter") or meta.get("sarga"),
-            "verse": row["verse"] if row["verse"] is not None else meta.get("verse") or meta.get("verse_start"),
-            "language": row["language"] or meta.get("language") or "",
-            "url": row["url"] or meta.get("url") or "",
-            "dataset_id": row["dataset_id"] or meta.get("dataset_id") or "",
-            "start_time_sec": row["start_time_sec"] if row["start_time_sec"] is not None else meta.get("start_time_sec"),
-            "end_time_sec": row["end_time_sec"] if row["end_time_sec"] is not None else meta.get("end_time_sec"),
-            "speaker_type": row["speaker_type"] or meta.get("speaker_type") or "",
-            "word_count": row["word_count"] if row["word_count"] is not None else meta.get("word_count"),
-            "preview": row["preview"] or meta.get("text_preview") or "",
-            "translated_preview": row["translated_preview"] or meta.get("translated_text_preview") or "",
-            "metadata": meta,
-        }
+        chunk = _row_to_chunk(row)
+        result[chunk["id"]] = chunk
     return result
+
+
+def _row_to_chunk(row) -> dict:
+    try:
+        meta = json.loads(row["metadata_json"] or "{}")
+    except Exception:
+        meta = {}
+    return {
+        "id": row["id"],
+        "text": row["text"],
+        "translated_text": row["translated_text"] or "",
+        "source": row["source"] or meta.get("source") or "",
+        "source_title": row["source_title"] or meta.get("source_title") or "",
+        "source_type": row["source_type"] or meta.get("source_type") or "text",
+        "citation": row["citation"] or meta.get("citation") or "",
+        "section": row["section"] or meta.get("section") or meta.get("kanda") or "",
+        "chapter": row["chapter"] if row["chapter"] is not None else meta.get("chapter") or meta.get("sarga"),
+        "verse": row["verse"] if row["verse"] is not None else meta.get("verse") or meta.get("verse_start"),
+        "language": row["language"] or meta.get("language") or "",
+        "url": row["url"] or meta.get("url") or "",
+        "dataset_id": row["dataset_id"] or meta.get("dataset_id") or "",
+        "start_time_sec": row["start_time_sec"] if row["start_time_sec"] is not None else meta.get("start_time_sec"),
+        "end_time_sec": row["end_time_sec"] if row["end_time_sec"] is not None else meta.get("end_time_sec"),
+        "speaker_type": row["speaker_type"] or meta.get("speaker_type") or "",
+        "word_count": row["word_count"] if row["word_count"] is not None else meta.get("word_count"),
+        "preview": row["preview"] or meta.get("text_preview") or "",
+        "translated_preview": row["translated_preview"] or meta.get("translated_text_preview") or "",
+        "vector_status": row["vector_status"] or "pending",
+        "vector_index": row["vector_index"] or "",
+        "vector_namespace": row["vector_namespace"] or "",
+        "vector_error": row["vector_error"] or "",
+        "vector_updated_at": row["vector_updated_at"],
+        "metadata": meta,
+    }

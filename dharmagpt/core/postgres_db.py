@@ -125,7 +125,23 @@ def ensure_schema(conn: psycopg.Connection) -> None:
             preview TEXT,
             translated_preview TEXT,
             metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            vector_status TEXT NOT NULL DEFAULT 'pending',
+            vector_index TEXT NOT NULL DEFAULT '',
+            vector_namespace TEXT NOT NULL DEFAULT '',
+            vector_error TEXT NOT NULL DEFAULT '',
+            vector_updated_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL
         )
+        """
+    )
+    conn.execute("ALTER TABLE chunk_store ADD COLUMN IF NOT EXISTS vector_status TEXT NOT NULL DEFAULT 'pending'")
+    conn.execute("ALTER TABLE chunk_store ADD COLUMN IF NOT EXISTS vector_index TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE chunk_store ADD COLUMN IF NOT EXISTS vector_namespace TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE chunk_store ADD COLUMN IF NOT EXISTS vector_error TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE chunk_store ADD COLUMN IF NOT EXISTS vector_updated_at TIMESTAMPTZ")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chunk_store_vector_status
+        ON chunk_store(vector_status, created_at)
         """
     )

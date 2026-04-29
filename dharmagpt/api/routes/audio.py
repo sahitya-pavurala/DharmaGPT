@@ -7,6 +7,7 @@ import tempfile
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
+from typing import Callable
 
 import httpx
 import structlog
@@ -70,6 +71,10 @@ _MIME_MAP = {
 _LANG_SHORT = {
     "te-in": "te", "hi-in": "hi", "sa-in": "sa", "en-in": "en", "en-us": "en",
 }
+
+
+class FatalProviderError(RuntimeError):
+    """Provider error that should stop a segmented upload immediately."""
 
 
 def _safe_filename(filename: str) -> str:
@@ -142,6 +147,7 @@ async def _sarvam_stt_and_translate_parallel(
 
     # Handle STT failure
     if isinstance(stt_result, Exception):
+        fatal = _is_auth_provider_error(stt_result)
         push_notification(
             event="sarvam_stt_failed",
             detail=str(stt_result),
@@ -149,6 +155,8 @@ async def _sarvam_stt_and_translate_parallel(
             level="error",
         )
         log.error("sarvam_stt_failed", file=filename, error=str(stt_result))
+        if fatal:
+            raise FatalProviderError(str(stt_result)) from stt_result
         raise stt_result  # STT is required — re-raise so caller can fall back
 
     # Handle translate failure (non-fatal — pipeline continues without English)
@@ -167,6 +175,12 @@ async def _sarvam_stt_and_translate_parallel(
             log.info("sarvam_translate_ok", file=filename, chars=len(en_text))
 
     return stt_result, en_text
+
+
+def _is_auth_provider_error(exc: Exception) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in {401, 403}
+    return "401" in str(exc) or "403" in str(exc) or "Forbidden" in str(exc)
 
 
 async def _transcribe_with_claude(audio_bytes: bytes, filename: str, language_code: str, suffix: str) -> dict:
@@ -233,6 +247,7 @@ async def _transcribe_with_auto_split(
     filename: str,
     language_code: str,
     suffix: str,
+    progress: Callable[[dict], None] | None = None,
 ) -> tuple[dict, str, str]:
     """
     Transparently splits large audio files into 29s segments before STT.
@@ -240,7 +255,12 @@ async def _transcribe_with_auto_split(
     Results from all segments are merged into a single transcript + word list.
     """
     if len(audio_bytes) <= _SPLIT_THRESHOLD_BYTES:
-        return await _transcribe_audio(audio_bytes, filename, language_code, suffix)
+        if progress:
+            progress({"stage": "transcription", "segments_total": 1, "segments_done": 0, "segments_failed": 0})
+        result = await _transcribe_audio(audio_bytes, filename, language_code, suffix)
+        if progress:
+            progress({"stage": "transcription", "segments_total": 1, "segments_done": 1, "segments_failed": 0})
+        return result
 
     log.info("audio_auto_split_start", file=filename, size_mb=round(len(audio_bytes) / 1e6, 2))
 
@@ -254,6 +274,13 @@ async def _transcribe_with_auto_split(
         os.unlink(tmp_src.name)
 
     log.info("audio_auto_split_done", segments=len(seg_paths))
+    if progress:
+        progress({
+            "stage": "transcription",
+            "segments_total": len(seg_paths),
+            "segments_done": 0,
+            "segments_failed": 0,
+        })
 
     all_text: list[str] = []
     all_words: list[dict] = []
@@ -261,6 +288,7 @@ async def _transcribe_with_auto_split(
     last_mode = "sarvam_stt"
     last_version = "saaras:v3"
     time_offset = 0.0
+    failed_segments = 0
 
     try:
         for i, seg_path in enumerate(seg_paths):
@@ -282,7 +310,35 @@ async def _transcribe_with_auto_split(
                         "end": (w.get("end") or 0.0) + time_offset,
                     })
             except Exception as exc:
+                failed_segments += 1
                 log.warning("segment_transcribe_failed", segment=i, error=str(exc))
+                if progress:
+                    progress({
+                        "stage": "transcription",
+                        "segments_total": len(seg_paths),
+                        "segments_done": i + 1,
+                        "segments_failed": failed_segments,
+                        "current_segment": i + 1,
+                        "last_error": str(exc)[:500],
+                    })
+                if isinstance(exc, FatalProviderError) or _is_auth_provider_error(exc):
+                    from core.dataset_store import push_notification
+                    push_notification(
+                        event="audio_upload_aborted",
+                        detail=f"Stopping segmented upload after provider auth failure on segment {i}: {exc}",
+                        file_name=filename,
+                        level="error",
+                    )
+                    raise RuntimeError(f"Provider auth failed on segment {i}; aborting remaining {len(seg_paths) - i - 1} segment(s)") from exc
+            else:
+                if progress:
+                    progress({
+                        "stage": "transcription",
+                        "segments_total": len(seg_paths),
+                        "segments_done": i + 1,
+                        "segments_failed": failed_segments,
+                        "current_segment": i + 1,
+                    })
             time_offset += _SEGMENT_SECS
     finally:
         for p in seg_paths:
@@ -331,23 +387,126 @@ async def transcribe_audio(
         raise HTTPException(status_code=413, detail="File too large. Max 100MB.")
     source_file_path, content_sha256 = _save_audio_source(file.filename or "audio", audio_bytes)
     reset_translation_provider_state()
+    resolved_source = source or source_stem_from_audio_filename(
+        file.filename or "audio",
+        language=normalize_language_tag(language_code),
+    )
+    resolved_title = source_title or description or file.filename or ""
+    ds_id = dataset_name.strip()
+    run_id = record_ingestion_run(
+        kind="audio",
+        source=resolved_source,
+        source_title=resolved_title,
+        file_name=file.filename or "",
+        language=language_code,
+        dataset_id=ds_id,
+        status="running",
+        chunks=0,
+        vectors=0,
+        vector_db="postgres",
+        embedding_backend="",
+        transcription_mode=settings.stt_backend,
+        transcription_version="",
+        metadata={
+            "source_file_path": source_file_path,
+            "content_sha256": content_sha256,
+            "stage": "transcription",
+            "size_bytes": len(audio_bytes),
+        },
+    )
+
+    last_progress: dict = {}
+
+    def run_metadata(extra: dict | None = None) -> dict:
+        return {
+            "source_file_path": source_file_path,
+            "content_sha256": content_sha256,
+            "size_bytes": len(audio_bytes),
+            **last_progress,
+            **(extra or {}),
+        }
+
+    def update_progress(extra: dict) -> None:
+        last_progress.update(extra)
+        record_ingestion_run(
+            id=run_id,
+            kind="audio",
+            source=resolved_source,
+            source_title=resolved_title,
+            file_name=file.filename or "",
+            language=language_code,
+            dataset_id=ds_id,
+            status="running",
+            chunks=0,
+            vectors=0,
+            vector_db="postgres",
+            embedding_backend="",
+            transcription_mode=settings.stt_backend,
+            transcription_version="",
+            metadata=run_metadata(),
+        )
 
     log.info("audio_transcribe_start", file=file.filename, lang=language_code, size_mb=round(len(audio_bytes)/1e6, 2), stt_backend=settings.stt_backend)
 
     try:
         transcript_data, transcription_mode, transcription_version = await _transcribe_with_auto_split(
-            audio_bytes, file.filename, language_code, suffix
+            audio_bytes, file.filename, language_code, suffix, progress=update_progress
         )
     except Exception as e:
+        dataset_store.push_notification(
+            event="audio_transcription_failed",
+            detail=str(e),
+            file_name=file.filename or "",
+            level="error",
+        )
+        record_ingestion_run(
+            id=run_id,
+            kind="audio",
+            source=resolved_source,
+            source_title=resolved_title,
+            file_name=file.filename or "",
+            language=language_code,
+            dataset_id=ds_id,
+            status="failed",
+            chunks=0,
+            vectors=0,
+            vector_db="postgres",
+            embedding_backend="",
+            transcription_mode=settings.stt_backend,
+            transcription_version="",
+            error=str(e),
+            metadata=run_metadata({
+                "stage": "transcription",
+                "last_error": str(e)[:500],
+            }),
+        )
         log.error("stt_error", error=str(e), stt_backend=settings.stt_backend)
         raise HTTPException(status_code=502, detail="Audio transcription service unavailable.")
 
     transcript_text = transcript_data.get("transcript", "")
     if not transcript_text:
+        record_ingestion_run(
+            id=run_id,
+            kind="audio",
+            source=resolved_source,
+            source_title=resolved_title,
+            file_name=file.filename or "",
+            language=language_code,
+            dataset_id=ds_id,
+            status="failed",
+            chunks=0,
+            vectors=0,
+            vector_db="postgres",
+            transcription_mode=settings.stt_backend,
+            error="No speech detected in audio file.",
+            metadata=run_metadata({
+                "stage": "transcription",
+                "last_error": "No speech detected in audio file.",
+            }),
+        )
         raise HTTPException(status_code=422, detail="No speech detected in audio file.")
 
     # Register dataset and chunk/index
-    ds_id = dataset_name.strip()
     if ds_id:
         dataset_store.register(ds_id)
 
@@ -355,8 +514,8 @@ async def transcribe_audio(
         "language_code": language_code,
         "section": section,
         "description": description or file.filename,
-        "source_title": source_title or description or file.filename,
-        "source": source or source_stem_from_audio_filename(file.filename, language=normalize_language_tag(language_code)),
+        "source_title": resolved_title,
+        "source": resolved_source,
         "transcription_mode": transcription_mode,
         "transcription_version": transcription_version,
         "text_source": "Valmiki Ramayana",
@@ -366,8 +525,31 @@ async def transcribe_audio(
     }
     try:
         chunk_result = await chunk_and_index(transcript_data, file.filename, file_metadata, dataset_id=ds_id)
+        record_ingestion_run(
+            id=run_id,
+            kind="audio",
+            source=file_metadata["source"],
+            source_title=file_metadata["source_title"],
+            file_name=file.filename or "",
+            language=language_code,
+            dataset_id=ds_id,
+            status="running",
+            chunks=chunk_result.get("chunks_created") or 0,
+            vectors=0,
+            vector_db="postgres",
+            embedding_backend="",
+            transcription_mode=transcription_mode,
+            transcription_version=transcription_version,
+            translation_backend=chunk_result.get("translation_backend"),
+            translation_version=chunk_result.get("translation_version"),
+            metadata=run_metadata({
+                "stage": "staging",
+                "chunks_created": chunk_result.get("chunks_created") or 0,
+            }),
+        )
     except Exception as exc:
         record_ingestion_run(
+            id=run_id,
             kind="audio",
             source=file_metadata["source"],
             source_title=file_metadata["source_title"],
@@ -378,10 +560,10 @@ async def transcribe_audio(
             error=str(exc),
             transcription_mode=transcription_mode,
             transcription_version=transcription_version,
-            metadata={
-                "source_file_path": source_file_path,
-                "content_sha256": content_sha256,
-            },
+            metadata=run_metadata({
+                "stage": "staging",
+                "last_error": str(exc)[:500],
+            }),
         )
         raise HTTPException(status_code=503, detail="Translation/indexing providers unavailable; retry later.") from exc
     if ds_id:
@@ -434,6 +616,28 @@ async def transcribe_audio(
         with transcript_path.open("w", encoding="utf-8") as fh:
             fh.write(json.dumps(transcript_record, ensure_ascii=False) + "\n")
     except OSError as exc:
+        record_ingestion_run(
+            id=run_id,
+            kind="audio",
+            source=file_metadata["source"],
+            source_title=file_metadata["source_title"],
+            file_name=file.filename or "",
+            language=language_code,
+            dataset_id=ds_id,
+            status="failed",
+            chunks=chunk_result.get("chunks_created") or 0,
+            vectors=chunk_result.get("vectors_upserted") or 0,
+            vector_db=chunk_result.get("vector_db"),
+            embedding_backend=chunk_result.get("embedding_backend"),
+            transcription_mode=transcription_mode,
+            transcription_version=transcription_version,
+            translation_backend=chunk_result.get("translation_backend"),
+            translation_version=chunk_result.get("translation_version"),
+            error=str(exc),
+            metadata=run_metadata({
+                "stage": "transcript_artifact",
+            }),
+        )
         log.error("audio_transcript_save_failed", file=file.filename, path=str(transcript_path), error=str(exc))
         raise HTTPException(status_code=500, detail="Transcript artifact could not be saved.")
 
@@ -448,6 +652,7 @@ async def transcribe_audio(
         transcript_file=transcript_file_name,
     )
     run_id = record_ingestion_run(
+        id=run_id,
         kind="audio",
         source=file_metadata["source"],
         source_title=file_metadata["source_title"],
@@ -463,11 +668,10 @@ async def transcribe_audio(
         transcription_version=transcription_version,
         translation_backend=chunk_result.get("translation_backend"),
         translation_version=chunk_result.get("translation_version"),
-        metadata={
+        metadata=run_metadata({
             "transcript_file": str(transcript_path),
-            "source_file_path": source_file_path,
-            "content_sha256": content_sha256,
-        },
+            "stage": "complete",
+        }),
     )
     _append_audio_audit({
         "timestamp": datetime.now(timezone.utc).isoformat(),
