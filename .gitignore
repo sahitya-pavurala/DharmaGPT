@@ -23,6 +23,7 @@ scripts/scraper/
 *.transcript.json
 # Ignore generated/large JSONL data but not checked-in eval/seed files
 dharmagpt/knowledge/**/*.jsonl
+dharmagpt/knowledge/reports/
 dharmagpt/evaluation/reports/*.jsonl
 data/**/*.jsonl
 

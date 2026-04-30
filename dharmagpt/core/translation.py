@@ -259,6 +259,7 @@ def _translate_with_ollama(text: str, config: TranslationConfig, source_lang: st
 def _load_indictrans2_model(model_name: str):
     import torch
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    from IndicTransToolkit import IndicProcessor
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -269,7 +270,8 @@ def _load_indictrans2_model(model_name: str):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
     model.eval()
-    return tokenizer, model, device
+    processor = IndicProcessor(inference=True)
+    return tokenizer, model, device, processor
 
 
 def _split_sentences(text: str, lang_code: str) -> list[str]:
@@ -284,6 +286,33 @@ def _split_sentences(text: str, lang_code: str) -> list[str]:
         return [text.strip()]
 
 
+def _split_long_translation_units(sentences: list[str], max_chars: int = 220) -> list[str]:
+    units: list[str] = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if len(sentence) <= max_chars:
+            units.append(sentence)
+            continue
+
+        words = sentence.split()
+        current: list[str] = []
+        current_len = 0
+        for word in words:
+            next_len = current_len + len(word) + (1 if current else 0)
+            if current and next_len > max_chars:
+                units.append(" ".join(current))
+                current = [word]
+                current_len = len(word)
+            else:
+                current.append(word)
+                current_len = next_len
+        if current:
+            units.append(" ".join(current))
+    return units or [" ".join(sentences).strip()]
+
+
 def _translate_with_indictrans2(
     text: str,
     config: TranslationConfig,
@@ -293,20 +322,28 @@ def _translate_with_indictrans2(
     import torch
 
     with _INDICTRANS2_LOCK:
-        tokenizer, model, device = _load_indictrans2_model(config.indictrans2_model)
-        sentences = _split_sentences(text, source_lang)
+        tokenizer, model, device, processor = _load_indictrans2_model(config.indictrans2_model)
+        sentences = _split_long_translation_units(_split_sentences(text, source_lang))
         outputs: list[str] = []
 
         with torch.no_grad():
-            for sentence in sentences:
+            for start in range(0, len(sentences), 8):
+                batch = processor.preprocess_batch(
+                    sentences[start : start + 8],
+                    src_lang=source_lang,
+                    tgt_lang=target_lang,
+                )
                 inputs = tokenizer(
-                    sentence,
+                    batch,
                     truncation=True,
-                    padding=False,
+                    padding="longest",
                     return_tensors="pt",
+                    return_attention_mask=True,
                 ).to(device)
                 generated = model.generate(
                     **inputs,
+                    use_cache=True,
+                    min_length=0,
                     max_new_tokens=256,
                     num_beams=5,
                     num_return_sequences=1,
@@ -316,8 +353,11 @@ def _translate_with_indictrans2(
                     skip_special_tokens=True,
                     clean_up_tokenization_spaces=True,
                 )
-                if decoded:
-                    outputs.append(decoded[0].strip())
+                outputs.extend(
+                    piece.strip()
+                    for piece in processor.postprocess_batch(decoded, lang=target_lang)
+                    if piece.strip()
+                )
 
     return " ".join(piece for piece in outputs if piece).strip()
 

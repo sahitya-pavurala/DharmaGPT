@@ -12,6 +12,7 @@ nltk==3.9.4
 sacremoses==0.1.1
 accelerate==1.13.0
 indic-nlp-library==0.92
+indictranstoolkit==1.1.1
 regex==2026.4.4
 mock==5.2.0
 
@@ -32,6 +33,8 @@ pinecone==5.0.0
 requests==2.32.3
 python-multipart==0.0.9
 imageio-ffmpeg==0.6.0
+librosa==0.11.0
+onnxruntime==1.23.2
 soundfile
 
 # Scraping + corpus

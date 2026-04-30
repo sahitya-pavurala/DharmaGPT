@@ -177,6 +177,14 @@ async def _sarvam_stt_and_translate_parallel(
     return stt_result, en_text
 
 
+def _use_sarvam_audio_translation() -> bool:
+    return (settings.translation_backend or "").strip().lower() in {
+        "sarvam",
+        "sarvam_stt_translate",
+        "sarvam-audio",
+    }
+
+
 def _is_auth_provider_error(exc: Exception) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in {401, 403}
@@ -223,6 +231,19 @@ async def _transcribe_with_claude(audio_bytes: bytes, filename: str, language_co
     return {"transcript": transcript, "words": []}
 
 
+async def _transcribe_with_indicconformer(audio_bytes: bytes, filename: str, language_code: str, suffix: str) -> tuple[dict, str, str]:
+    from core.backends.asr import transcribe_indicconformer
+
+    result = await asyncio.to_thread(
+        transcribe_indicconformer,
+        audio_bytes,
+        filename=filename,
+        language_code=language_code,
+        suffix=suffix,
+    )
+    return {"transcript": result.transcript, "words": result.words}, result.backend, result.version
+
+
 async def _transcribe_audio(
     audio_bytes: bytes,
     filename: str,
@@ -231,14 +252,25 @@ async def _transcribe_audio(
 ) -> tuple[dict, str, str]:
     """Returns (transcript_data, transcription_mode, transcription_version).
 
-    STT_BACKEND=sarvam (production default).
-    No fallback — if Sarvam fails the exception propagates and kills the pipeline.
+    STT_BACKEND=sarvam (production default). Translation is controlled by
+    TRANSLATION_BACKEND: Sarvam audio translate is used only when Sarvam is the
+    selected translation backend; local backends translate later during chunking.
     """
-    data, en_text = await _sarvam_stt_and_translate_parallel(
-        audio_bytes, filename, language_code, suffix
-    )
-    if en_text:
-        data["text_en_sarvam"] = en_text
+    stt_backend = (settings.stt_backend or "sarvam").strip().lower()
+    if stt_backend in {"indicconformer", "local_indicconformer", "ai4bharat_indicconformer"}:
+        return await _transcribe_with_indicconformer(audio_bytes, filename, language_code, suffix)
+    if stt_backend != "sarvam":
+        raise RuntimeError(f"Unknown STT_BACKEND: {settings.stt_backend!r}")
+
+    if _use_sarvam_audio_translation():
+        data, en_text = await _sarvam_stt_and_translate_parallel(
+            audio_bytes, filename, language_code, suffix
+        )
+        if en_text:
+            data["text_en_sarvam"] = en_text
+        return data, "sarvam_stt", "saaras:v3"
+
+    data = await _transcribe_with_sarvam(audio_bytes, filename, language_code, suffix)
     return data, "sarvam_stt", "saaras:v3"
 
 

@@ -6,6 +6,7 @@ No fallback — if the configured backend fails, the exception propagates immedi
 
 Supported values:
   openai      — OpenAI text-embedding-3-large (default, best quality)
+  ollama      — Local Ollama embedding model, e.g. nomic-embed-text
   local_hash  — Deterministic hash embedding, free, no API — for smoke tests only
 """
 from __future__ import annotations
@@ -32,6 +33,48 @@ class OpenAIEmbeddings:
     def embed_query(self, text: str) -> List[float]:
         response = self._client.embeddings.create(model=self._model, input=[text])
         return response.data[0].embedding
+
+
+class OllamaEmbeddings:
+    def __init__(self, model: str, base_url: str, dims: int):
+        self._model = model
+        self._base_url = base_url.rstrip("/")
+        self._dims = dims
+
+    def _embed(self, texts: List[str]) -> List[List[float]]:
+        import requests
+
+        response = requests.post(
+            f"{self._base_url}/api/embed",
+            json={"model": self._model, "input": texts},
+            timeout=120,
+        )
+        if response.status_code == 404:
+            vectors = []
+            for text in texts:
+                legacy = requests.post(
+                    f"{self._base_url}/api/embeddings",
+                    json={"model": self._model, "prompt": text},
+                    timeout=120,
+                )
+                legacy.raise_for_status()
+                vectors.append(legacy.json()["embedding"])
+            return vectors
+
+        response.raise_for_status()
+        data = response.json()
+        vectors = data.get("embeddings")
+        if vectors is None and data.get("embedding") is not None:
+            vectors = [data["embedding"]]
+        if not isinstance(vectors, list):
+            raise RuntimeError("Ollama embedding response did not include embeddings")
+        return vectors
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self._embed(texts)
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embed([text])[0]
 
 
 class LocalHashEmbeddings:
@@ -76,8 +119,12 @@ def get_embedder():
         log.info("embedding_backend_loaded", backend="local_hash")
         return LocalHashEmbeddings(dims=s.embedding_dims)
 
+    if backend == "ollama":
+        log.info("embedding_backend_loaded", backend="ollama", model=s.embedding_model)
+        return OllamaEmbeddings(model=s.embedding_model, base_url=s.ollama_url, dims=s.embedding_dims)
+
     if backend == "openai":
         log.info("embedding_backend_loaded", backend="openai", model=s.embedding_model)
         return OpenAIEmbeddings(model=s.embedding_model, api_key=s.openai_api_key, dims=s.embedding_dims)
 
-    raise ValueError(f"Unknown EMBEDDING_BACKEND: {backend!r}. Valid values: openai | local_hash")
+    raise ValueError(f"Unknown EMBEDDING_BACKEND: {backend!r}. Valid values: openai | ollama | local_hash")

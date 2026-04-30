@@ -21,6 +21,10 @@ def client(monkeypatch):
         def __init__(self, *args, **kwargs):
             self.models = FakeAnthropicModels()
 
+    class FakeEmbedder:
+        def embed_query(self, text):
+            return [0.0] * 3072
+
     async def fake_http_get(self, url, **kwargs):
         class Response:
             status_code = 200
@@ -34,6 +38,7 @@ def client(monkeypatch):
         return Response()
 
     monkeypatch.setattr(health_route, "get_pinecone", lambda: FakePinecone())
+    monkeypatch.setattr(health_route, "get_embedder", lambda: FakeEmbedder())
     monkeypatch.setattr(health_route.anthropic, "Anthropic", FakeAnthropic)
     monkeypatch.setattr(health_route.httpx.AsyncClient, "get", fake_http_get)
     monkeypatch.setattr(health_route.settings, "llm_backend", "ollama")

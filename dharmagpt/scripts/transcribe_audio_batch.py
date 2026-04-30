@@ -176,10 +176,12 @@ def upload_chunk(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Segment audio sources into 29s clips and transcribe them")
-    parser.add_argument("--input-dir", required=True, help="Directory with source audio files")
+    parser.add_argument("--input-dir", help="Directory with source audio files")
+    parser.add_argument("--file", help="Single source audio file to process")
     parser.add_argument("--output-dir", default="downloads/clips_29s_full", help="Directory for persistent 29s chunks")
     parser.add_argument("--recursive", action="store_true", help="Recurse into subdirectories")
     parser.add_argument("--overwrite", action="store_true", help="Rebuild clips even if they already exist")
+    parser.add_argument("--split-only", action="store_true", help="Only create persistent clips; do not call the API")
     parser.add_argument("--segment-seconds", type=int, default=29, help="Chunk length in seconds")
     parser.add_argument("--language-code", default="te-IN", help="Sarvam language code for transcription")
     parser.add_argument("--language-tag", default="te", help="Short language tag used in filenames")
@@ -200,18 +202,31 @@ def main() -> None:
     parser.add_argument("--chunk-delay", type=float, default=1.0, help="Delay between chunk uploads in seconds")
     args = parser.parse_args()
 
-    input_dir = resolve_input_path(args.input_dir)
-    if not input_dir.exists() or not input_dir.is_dir():
-        raise SystemExit(f"Input directory not found: {input_dir}")
+    if bool(args.file) == bool(args.input_dir):
+        raise SystemExit("Pass exactly one of --file or --input-dir")
+
+    input_dir: Path | None = None
+    if args.file:
+        target_file = resolve_input_path(args.file)
+        if not target_file.exists() or not target_file.is_file():
+            raise SystemExit(f"Input file not found: {target_file}")
+        if target_file.suffix.lower() not in SUPPORTED:
+            supported = ", ".join(sorted(SUPPORTED))
+            raise SystemExit(f"Unsupported audio file: {target_file}. Supported: {supported}")
+        files = [target_file]
+    else:
+        input_dir = resolve_input_path(args.input_dir)
+        if not input_dir.exists() or not input_dir.is_dir():
+            raise SystemExit(f"Input directory not found: {input_dir}")
+        files = discover_audio_files(input_dir, recursive=args.recursive)
+        if not files:
+            raise SystemExit(f"No supported audio files found in {input_dir}")
 
     output_dir = resolve_input_path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     language_tag = normalize_language_tag(args.language_tag)
     admin_api_key = (args.admin_api_key or "").strip()
-    files = discover_audio_files(input_dir, recursive=args.recursive)
-    if not files:
-        raise SystemExit(f"No supported audio files found in {input_dir}")
 
     summary: list[dict] = []
     total_chunks = 0
@@ -219,10 +234,11 @@ def main() -> None:
     total_failed = 0
 
     print(f"Found {len(files)} source file(s)")
-    print(f"Input:  {input_dir}")
+    print(f"Input:  {input_dir or files[0]}")
     print(f"Output: {output_dir}")
     print(f"Chunk:  {args.segment_seconds}s")
-    print(f"API:    {args.api_url}\n")
+    print(f"API:    {args.api_url}")
+    print(f"Mode:   {'split only' if args.split_only else 'transcribe'}")
     print(f"Auth:   {'enabled' if admin_api_key else 'disabled'}\n")
 
     for index, source in enumerate(files, start=1):
@@ -254,6 +270,16 @@ def main() -> None:
             total_chunks += 1
             expected_name = expected_transcript_name(chunk_path, language_tag)
             expected_path = expected_transcript_path(chunk_path, language_tag)
+            if args.split_only:
+                print(f"  - split {chunk_path.name}")
+                source_result["chunks"].append(
+                    {
+                        "chunk": str(chunk_path),
+                        "status": "split_only",
+                        "transcript_file_name": expected_name,
+                    }
+                )
+                continue
             if expected_path.exists() and not args.overwrite:
                 print(f"  - skip {chunk_path.name} (transcript exists)")
                 source_result["chunks"].append(

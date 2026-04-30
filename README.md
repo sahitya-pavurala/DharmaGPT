@@ -97,7 +97,9 @@ Run them in order for text corpus: `normalize_raw_corpus â†’ translate_corpus â†
 
 ### Prerequisites
 - Python 3.11+
-- API keys: Anthropic, Pinecone, OpenAI (embeddings), Sarvam AI
+- Production API keys as needed: Anthropic/OpenAI, Pinecone, Sarvam AI
+- Beta/staging corpus creation can run without Sarvam by using local Indic models:
+  `STT_BACKEND=indicconformer` and `TRANSLATION_BACKEND=indictrans2`
 
 ### Run the API
 
@@ -117,7 +119,15 @@ For Telugu to English translation, the audio pipeline now supports multiple back
 - `ollama` for local models
 - `indictrans2` for AI4Bharat IndicTrans2
 
-The official AI4Bharat repository is cloned under `downloads/IndicTrans2`. Their top-level `install.sh` is Linux/conda-oriented, so on Windows we install the Python dependencies directly in the local runtime and use the Hugging Face model path through the shared translation layer.
+For beta/staging corpus work, prefer:
+
+```bash
+STT_BACKEND=indicconformer
+TRANSLATION_BACKEND=indictrans2
+INDICTRANS2_MODEL=ai4bharat/indictrans2-indic-en-dist-200M
+```
+
+`indicconformer` uses a local ONNX export of AI4Bharat IndicConformer for Telugu ASR. `indictrans2` uses AI4Bharat IndicTrans2 for Telugu-English translation. This keeps the beta audio/corpus pipeline off Sarvam by default; Sarvam remains available as a production or fallback backend when configured.
 
 ### Knowledge File Naming
 

@@ -100,6 +100,9 @@ class HealthResponse(BaseModel):
     pinecone: bool
     vector_backend: str = "pinecone"
     vector_store: bool = False
+    embedding_backend: str = "openai"
+    embedding_model: str = ""
+    embedding: bool = False
     anthropic: bool
     sarvam: bool
     vector_name: str

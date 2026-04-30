@@ -150,7 +150,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--backend", type=str, default=None,
-        help="Override TRANSLATION_BACKEND for this run (ollama | sarvam | anthropic | skip)",
+        help="Override TRANSLATION_BACKEND for this run (indictrans2 | ollama | sarvam | anthropic | openai | skip)",
     )
     args = parser.parse_args()
 

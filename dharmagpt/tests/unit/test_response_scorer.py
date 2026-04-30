@@ -23,7 +23,9 @@ from evaluation.response_scorer import (
     _compute_overall_score,
     _compute_retrieval_stats,
     _format_passages_for_judge,
+    validate_response,
 )
+from core.llm import LLMBackend, LLMConfig
 from models.schemas import QueryMode, QueryResponse, SourceChunk
 
 
@@ -257,3 +259,39 @@ def test_validation_result_to_dict_shape():
     assert "retrieval" in d
     assert d["retrieval"]["source_count"] == 3
     assert d["metrics"]["citation_precision"]["details"] == {"invalid_citations": ["fake ref"]}
+
+
+def test_validate_response_uses_one_combined_judge_call(monkeypatch):
+    calls = []
+
+    def fake_call_judge(role, query, answer, sources, config):
+        calls.append(role)
+        return {
+            "faithfulness": {
+                "score": 0.9,
+                "unsupported_claims": [],
+                "reasoning": "All factual claims are supported.",
+            },
+            "answer_relevance": {"score": 0.8, "reasoning": "The answer is relevant."},
+            "context_utilization": {"score": 0.7, "reasoning": "The answer uses context."},
+            "citation_precision": {
+                "score": 0.6,
+                "invalid_citations": [],
+                "reasoning": "Citations are mostly precise.",
+            },
+        }
+
+    monkeypatch.setattr("evaluation.response_scorer._call_judge", fake_call_judge)
+
+    result = validate_response(
+        "What is dharma?",
+        _response(),
+        judge_config=LLMConfig(
+            backend=LLMBackend.ollama,
+            model="qwen2.5:7b",
+        ),
+    )
+
+    assert calls == ["combined"]
+    assert result.overall_score == pytest.approx(0.785)
+    assert result.passed is True

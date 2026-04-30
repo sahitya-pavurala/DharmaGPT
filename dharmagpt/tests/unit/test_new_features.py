@@ -121,6 +121,92 @@ def test_split_threshold_constant():
     assert _SEGMENT_SECS == 29
 
 
+def test_zero_indexed_generated_audio_parts_map_to_canonical_parts():
+    from utils.naming import part_number_from_filename
+
+    assert part_number_from_filename("source_te_audio_part0000.mp3") == 1
+    assert part_number_from_filename("source_te_audio_part0001.mp3") == 2
+    assert part_number_from_filename("source_te_audio_part0281.mp3") == 282
+    assert part_number_from_filename("source_te_transcript_part01.jsonl") == 1
+    assert part_number_from_filename("source_te_transcript_part12.jsonl") == 12
+
+
+def test_ollama_embedding_backend_batches_requests(monkeypatch):
+    from core.backends.embedding import OllamaEmbeddings
+
+    calls = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[0.1, 0.2], [0.3, 0.4]]}
+
+    def fake_post(url, json, timeout):
+        calls.append((url, json, timeout))
+        return Response()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    embedder = OllamaEmbeddings(model="nomic-embed-text", base_url="http://localhost:11434/", dims=768)
+    vectors = embedder.embed_documents(["rama", "dharma"])
+
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+    assert calls == [
+        (
+            "http://localhost:11434/api/embed",
+            {"model": "nomic-embed-text", "input": ["rama", "dharma"]},
+            120,
+        )
+    ]
+
+
+def test_openai_chat_backend_maps_messages(monkeypatch):
+    from core.backends.llm import OpenAIChatModel
+
+    captured = {}
+
+    class FakeMessage:
+        content = "answer text"
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return type("Response", (), {"choices": [FakeChoice()]})()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, api_key, timeout):
+            captured["api_key"] = api_key
+            captured["timeout"] = timeout
+            self.chat = FakeChat()
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+
+    model = OpenAIChatModel(model="gpt-4.1-mini", api_key="test-key", timeout=30)
+    response = model.invoke([
+        {"role": "system", "content": "Be precise."},
+        {"role": "user", "content": "What is dharma?"},
+    ])
+
+    assert response.content == "answer text"
+    assert captured["api_key"] == "test-key"
+    assert captured["timeout"] == 30
+    assert captured["model"] == "gpt-4.1-mini"
+    assert captured["messages"] == [
+        {"role": "system", "content": "Be precise."},
+        {"role": "user", "content": "What is dharma?"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_small_file_skips_split():
     """Files under threshold go straight to _transcribe_audio without splitting."""

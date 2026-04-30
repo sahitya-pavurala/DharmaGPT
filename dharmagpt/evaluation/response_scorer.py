@@ -4,10 +4,8 @@ response_scorer.py - score a DharmaGPT RAG response across quality dimensions.
 Entry point: validate_response(query, response) -> ValidationResult
 
 Default judge stack (configurable via .env):
-  sarvamai/sarvam-m   (primary)   -> answer_relevance, context_utilization
-  sarvamai/sarvam-30b (secondary) -> faithfulness, citation_precision
+  Anthropic judge -> faithfulness, answer_relevance, context_utilization, citation_precision
 
-Both run via an OpenAI-compatible API (default: http://localhost:8000/v1).
 Override by passing judge_config to validate_response() — used in local model tests.
 
 Two rule-based metrics (free, no API call):
@@ -44,9 +42,6 @@ METRIC_WEIGHTS: dict[str, float] = {
     "citation_precision": 0.15,
 }
 
-_PRIMARY_METRICS = ("answer_relevance", "context_utilization")
-_SECONDARY_METRICS = ("faithfulness", "citation_precision")
-
 # Regex patterns used to check whether an answer follows the expected mode format
 _MODE_COMPLIANCE_PATTERNS: dict[str, re.Pattern] = {
     "guidance": re.compile(r"\?"),
@@ -61,6 +56,58 @@ _JUDGE_SYSTEM = (
 )
 
 _JUDGE_PROMPTS: dict[str, str] = {
+    "combined": """\
+Evaluate this response from DharmaGPT, a Q&A system grounded in Hindu sacred texts.
+
+QUERY:
+{query}
+
+RETRIEVED PASSAGES (the only factual source the system should draw from):
+{passages}
+
+SYSTEM RESPONSE:
+{answer}
+
+Return ONLY this JSON object. Do not wrap it in markdown or add any explanation:
+{{
+  "faithfulness": {{
+    "score": <0.0-1.0>,
+    "unsupported_claims": ["<claim not found in passages>"],
+    "reasoning": "<one sentence>"
+  }},
+  "answer_relevance": {{
+    "score": <0.0-1.0>,
+    "reasoning": "<one sentence>"
+  }},
+  "context_utilization": {{
+    "score": <0.0-1.0>,
+    "reasoning": "<one sentence>"
+  }},
+  "citation_precision": {{
+    "score": <0.0-1.0>,
+    "invalid_citations": ["<citation that cannot be verified against the passages>"],
+    "reasoning": "<one sentence>"
+  }}
+}}
+
+SCORING CRITERIA:
+
+faithfulness (0-1): What fraction of specific factual claims (events, characters, teachings,
+verse contents) in the answer are directly supported by the retrieved passages above?
+Claims that come only from model training data - not from the passages - must be flagged
+as unsupported. Score 1.0 only if every factual claim is traceable to a passage.
+
+answer_relevance (0-1): How directly and completely does the answer address the user's
+query? 1.0 = fully on-topic and complete, 0.0 = completely off-topic or empty.
+
+context_utilization (0-1): To what degree is the answer grounded in the retrieved passages
+versus drawn from the model's general training data? 1.0 = answer is tightly built from
+the passages, 0.0 = passages are ignored entirely.
+
+citation_precision (0-1): What fraction of inline citations of the form [Text, Section,
+Chapter/Verse X] are accurate and traceable to the retrieved passages? If the answer
+makes specific claims without any citations at all, score 0.0.
+""",
     "primary": """\
 Evaluate this response from DharmaGPT, a Q&A system grounded in Hindu sacred texts.
 
@@ -211,34 +258,27 @@ def validate_response(
     """
     Score a RAG response across faithfulness, relevance, context use, and citation quality.
 
-    Makes two judge LLM calls:
-      - primary   (sarvamai/sarvam-m):   answer_relevance + context_utilization
-      - secondary (sarvamai/sarvam-30b): faithfulness + citation_precision
-
-    Both calls use judge_config when provided (overrides both roles).
-    Pass an Ollama LLMConfig to score with a local model instead — no Sarvam server needed.
+    Makes one judge LLM call for all four LLM-scored metrics. Use Anthropic for the
+    production judge; pass an Ollama LLMConfig for local no-cost smoke validation.
 
     Rule-based metrics (retrieval stats, mode compliance) are computed locally, no LLM.
 
     Returns a ValidationResult with per-metric scores and an overall pass/fail.
     """
-    config_primary = judge_config or _llm_config("primary")
-    config_secondary = judge_config or _llm_config("secondary")
+    config = judge_config or _llm_config("primary")
     log.info(
         "scoring_response",
         query_id=response.query_id,
         mode=response.mode,
-        primary_judge=config_primary.model,
-        secondary_judge=config_secondary.model,
+        judge=config.model,
     )
 
-    primary_data = _call_judge("primary", query, response.answer, response.sources, config_primary)
-    secondary_data = _call_judge("secondary", query, response.answer, response.sources, config_secondary)
+    judge_data = _call_judge("combined", query, response.answer, response.sources, config)
 
-    faithfulness = _build_metric("faithfulness", secondary_data["faithfulness"], "unsupported_claims")
-    answer_relevance = _build_metric("answer_relevance", primary_data["answer_relevance"])
-    context_utilization = _build_metric("context_utilization", primary_data["context_utilization"])
-    citation_precision = _build_metric("citation_precision", secondary_data["citation_precision"], "invalid_citations")
+    faithfulness = _build_metric("faithfulness", judge_data["faithfulness"], "unsupported_claims")
+    answer_relevance = _build_metric("answer_relevance", judge_data["answer_relevance"])
+    context_utilization = _build_metric("context_utilization", judge_data["context_utilization"])
+    citation_precision = _build_metric("citation_precision", judge_data["citation_precision"], "invalid_citations")
 
     llm_metrics = {
         "faithfulness": faithfulness,

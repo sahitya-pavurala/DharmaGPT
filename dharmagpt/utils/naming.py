@@ -85,7 +85,11 @@ def part_number_from_filename(value: str | None, *, default: int = 1) -> int:
     if not match:
         return default
     try:
-        return max(1, int(match.group(1)))
+        raw_part = match.group(1)
+        part = int(raw_part)
+        if part == 0 or len(raw_part) >= 4:
+            return part + 1
+        return max(1, part)
     except ValueError:
         return default
 

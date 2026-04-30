@@ -5,9 +5,12 @@ Default: sarvam (TRANSLATION_BACKEND in .env)
 No fallback — if the configured backend fails, the exception propagates immediately.
 
 Supported values:
-  sarvam     — Sarvam translate API (default, best for Indic <-> English)
-  anthropic  — Claude via Anthropic API
-  skip       — no-op, returns original text untouched (use for English-only sources)
+  sarvam      — Sarvam translate API
+  anthropic   — Claude via Anthropic API
+  openai      — OpenAI chat translation
+  ollama      — local Ollama model
+  indictrans2 — local AI4Bharat IndicTrans2 model
+  skip        — no-op, returns original text untouched (use for English-only sources)
 """
 from __future__ import annotations
 
@@ -86,20 +89,28 @@ class Translator:
                 source_lang=source_lang, target_lang=target_lang, skipped=True,
             )
 
-        # No try/except — failure raises immediately, kills the pipeline
-        if backend == "sarvam":
-            translated = _translate_sarvam(text, source_lang, target_lang, s.sarvam_api_key)
-        elif backend == "anthropic":
-            translated = _translate_anthropic(
-                text, source_lang, target_lang, s.anthropic_model, s.anthropic_api_key,
-            )
-        else:
-            raise ValueError(
-                f"Unknown TRANSLATION_BACKEND: {backend!r}. Valid values: sarvam | anthropic | skip"
-            )
+        from core.translation import TranslationBackend, TranslationConfig, translate_text
+
+        outcome = translate_text(
+            text,
+            config=TranslationConfig(
+                backend=TranslationBackend(backend),
+                anthropic_model=s.anthropic_model,
+                anthropic_api_key=s.anthropic_api_key,
+                openai_api_key=s.openai_api_key,
+                sarvam_api_key=s.sarvam_api_key,
+                ollama_model=s.ollama_model,
+                ollama_url=s.ollama_url,
+                indictrans2_model=getattr(s, "indictrans2_model", "ai4bharat/indictrans2-indic-en-dist-200M"),
+                backend_order=(backend,),
+            ),
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        translated = outcome.text
 
         return TranslationResult(
-            text=translated, backend=backend,
+            text=translated, backend=outcome.backend,
             source_lang=source_lang, target_lang=target_lang,
         )
 

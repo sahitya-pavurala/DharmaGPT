@@ -56,7 +56,7 @@ def _migrate_datasets(conn: psycopg.Connection) -> int:
         rows = src.execute("SELECT name, display_name, active, vector_count, created_at FROM datasets").fetchall()
 
     count = 0
-    with conn:
+    with conn.transaction():
         for row in rows:
             conn.execute(
                 """
@@ -87,7 +87,7 @@ def _migrate_chunks(conn: psycopg.Connection) -> int:
         rows = src.execute("SELECT * FROM chunk_store").fetchall()
 
     count = 0
-    with conn:
+    with conn.transaction():
         for row in rows:
             metadata_json = row["metadata_json"] or "{}"
             conn.execute(
