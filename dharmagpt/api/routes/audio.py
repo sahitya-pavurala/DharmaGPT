@@ -110,10 +110,51 @@ async def _transcribe_with_sarvam(audio_bytes: bytes, filename: str, language_co
         return response.json()
 
 
+
 def _is_auth_provider_error(exc: Exception) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in {401, 403}
     return "401" in str(exc) or "403" in str(exc) or "Forbidden" in str(exc)
+
+async def _transcribe_with_claude(audio_bytes: bytes, filename: str, language_code: str, suffix: str) -> dict:
+    import base64
+    audio_b64 = base64.standard_b64encode(audio_bytes).decode()
+    media_type = _MIME_MAP.get(suffix, "audio/mpeg")
+    async with httpx.AsyncClient(timeout=180) as client:
+        response = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": settings.anthropic_api_key,
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "audio-1",
+                "content-type": "application/json",
+            },
+            json={
+                "model": settings.anthropic_model,
+                "max_tokens": 4096,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_audio",
+                            "source": {"type": "base64", "media_type": media_type, "data": audio_b64},
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Transcribe this {language_code} audio exactly as spoken. "
+                                "Return only the transcription text, nothing else."
+                            ),
+                        },
+                    ],
+                }],
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+    transcript = data["content"][0]["text"].strip()
+    return {"transcript": transcript, "words": []}
+
 
 async def _transcribe_audio(
     audio_bytes: bytes,
@@ -266,6 +307,8 @@ async def transcribe_audio(
     if len(audio_bytes) > 100 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large. Max 100MB.")
     source_file_path, content_sha256 = _save_audio_source(file.filename or "audio", audio_bytes)
+    from core.translation import reset_translation_provider_state
+    reset_translation_provider_state()
     resolved_source = source or source_stem_from_audio_filename(
         file.filename or "audio",
         language=normalize_language_tag(language_code),
@@ -537,6 +580,7 @@ async def transcribe_audio(
         embedding_backend=chunk_result.get("embedding_backend"),
         transcription_mode=transcription_mode,
         transcription_version=transcription_version,
+
         metadata=run_metadata({
             "transcript_file": str(transcript_path),
             "stage": "complete",

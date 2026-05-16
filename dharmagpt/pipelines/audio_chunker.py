@@ -4,6 +4,7 @@ Receives Sarvam STT transcript (with word timestamps + diarization),
 applies pause-boundary chunking, and stores enriched chunks in Postgres for
 later incremental vector sync.
 
+
 Translation is NOT done automatically — translations are provided manually via
 the discourse_translations table in Postgres.
 """
@@ -15,6 +16,7 @@ import uuid
 import structlog
 
 from core.chunk_store import upsert_chunk
+
 
 log = structlog.get_logger()
 
@@ -105,6 +107,7 @@ async def chunk_and_index(
     dataset_id: str = "",
 ) -> dict:
     """Main entry: chunk transcript and stage rows for later vector sync."""
+
     words = transcript_data.get("words", [])
     raw_text = transcript_data.get("transcript", "")
 
@@ -124,6 +127,7 @@ async def chunk_and_index(
     for index, chunk in enumerate(raw_chunks):
         chunk_id = f"audio_{stem}_{uuid.uuid4().hex[:8]}_{index:04d}"
         metadata = {
+
             "source_type": "audio",
             "source_file": filename,
             "source": file_metadata.get("source") or stem,
@@ -143,6 +147,7 @@ async def chunk_and_index(
             "transcription_version": file_metadata.get("transcription_version", "saaras:v3"),
             "embedding_backend": "",
             "chunk_index": index,
+
         }
         if dataset_id:
             metadata["dataset_id"] = dataset_id
@@ -152,9 +157,11 @@ async def chunk_and_index(
             text=chunk["text"],
             translated_text="",
             metadata=metadata,
+
             vector_status="pending",
         )
         stored += 1
+
 
     log.info(
         "audio_indexed",
@@ -162,10 +169,12 @@ async def chunk_and_index(
         chunks=len(raw_chunks),
         vector_db="postgres",
         vectors=0,
+
         chunks_stored=stored,
     )
     return {
         "chunks_created": len(raw_chunks),
+
         "vector_db": "postgres",
         "vectors_upserted": 0,
         "vector_status": "pending",

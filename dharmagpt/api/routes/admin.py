@@ -1297,10 +1297,17 @@ def _admin_page() -> str:
         <div><label>Section (optional)</label><input id="au-section" type="text" placeholder="e.g. Bala Kanda"/></div>
         <div><label>Description (optional)</label><input id="au-desc" type="text" placeholder="e.g. Part 1 clip 42"/></div>
       </div>
+<<<<<<< HEAD
       <button class="btn-primary" id="au-upload-btn" onclick="uploadAudio()">Transcribe & Stage</button>
       <div class="notice" id="au-notice"></div>
       <div class="progress-list" id="au-progress" style="display:none"></div>
     </div>
+=======
+	      <button class="btn-primary" id="au-upload-btn" onclick="uploadAudio()">Transcribe & Stage</button>
+	      <div class="notice" id="au-notice"></div>
+	      <div class="progress-list" id="au-progress" style="display:none"></div>
+	    </div>
+>>>>>>> main
 
     <hr class="divider"/>
 
@@ -1450,12 +1457,20 @@ function showTab(name) {
   document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
   document.getElementById("pane-"+name).classList.add("active");
   if(name==="datasets") loadDatasets();
+<<<<<<< HEAD
   if(name==="sources") loadSources();
   if(name==="stats") loadStats();
   if(name==="monitor") { loadMonitor(); loadAudioJobs(); loadChunks(); loadNotifications(); }
   if(name==="gold") loadGold();
   if(name==="translations") loadTranslations();
 }
+=======
+	  if(name==="sources") loadSources();
+	  if(name==="stats") loadStats();
+		  if(name==="monitor") { loadMonitor(); loadAudioJobs(); loadChunks(); loadNotifications(); }
+	  if(name==="gold") loadGold();
+	}
+>>>>>>> main
 
 function setNotice(id, msg, err=false) {
   const el = document.getElementById(id);
@@ -1740,6 +1755,10 @@ async function deleteDs(name) {
 	const AUDIO_STEPS = [
 	  ["upload", "Uploading audio to server"],
 	  ["transcribe", "Transcribing speech"],
+<<<<<<< HEAD
+=======
+	  ["translate", "Translating transcript when needed"],
+>>>>>>> main
 	  ["stage", "Writing chunks to Postgres"],
 	  ["done", "Ready for Pinecone sync"]
 	];
@@ -1858,10 +1877,18 @@ async function uploadAudio() {
   const progressTimer = setInterval(() => {
     const states = [
       ["transcribe", ["upload"], "Audio uploaded. Transcribing speech…"],
+<<<<<<< HEAD
       ["stage", ["upload","transcribe"], "Preparing chunks and writing to Postgres…"]
     ];
     const elapsed = Date.now() - startedAt;
     const idx = elapsed > 12000 ? 1 : elapsed > 2500 ? 0 : -1;
+=======
+      ["translate", ["upload","transcribe"], "Transcript received. Translating when needed…"],
+      ["stage", ["upload","transcribe","translate"], "Preparing chunks and writing to Postgres…"]
+    ];
+    const elapsed = Date.now() - startedAt;
+    const idx = elapsed > 45000 ? 2 : elapsed > 12000 ? 1 : elapsed > 2500 ? 0 : -1;
+>>>>>>> main
     if(idx >= 0) {
       renderAudioProgress(states[idx][0], states[idx][1]);
       setNotice("au-notice", states[idx][2]);
@@ -1873,8 +1900,13 @@ async function uploadAudio() {
     if(!r.ok){ const b=await r.json(); throw new Error(b.detail||r.statusText); }
     const d = await r.json();
     clearInterval(progressTimer);
+<<<<<<< HEAD
     renderAudioProgress("done", ["upload","transcribe","stage","done"]);
     setNotice("au-notice",`Done. ${d.chunks_created} chunks staged in Postgres.`);
+=======
+    renderAudioProgress("done", ["upload","transcribe","translate","stage","done"]);
+    setNotice("au-notice",`Done. ${d.chunks_created} chunks staged in Postgres. Translation: ${d.translation_backend||"none"}.`);
+>>>>>>> main
     showTab("monitor");
   } catch(e){
     clearInterval(progressTimer);
