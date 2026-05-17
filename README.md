@@ -1,5 +1,9 @@
 # DharmaGPT
 
+[![Powered by Sarvam AI](https://img.shields.io/badge/Audio-Sarvam%20AI-blue)](https://sarvam.ai)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![CI](https://github.com/ShambaviLabs/DharmaGPT/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ShambaviLabs/DharmaGPT/actions/workflows/ci.yml)
+
 AI-powered access to Hindu sacred texts, built around cited answers from source material.
 
 DharmaGPT is a FastAPI backend for asking questions, generating grounded retellings, looking up passages, and processing devotional audio. It uses retrieval-augmented generation so responses can point back to citations instead of relying on unsupported model output.
@@ -16,7 +20,7 @@ DharmaGPT is a FastAPI backend for asking questions, generating grounded retelli
 
 - FastAPI
 - Anthropic Claude
-- Pinecone
+- pgvector
 - OpenAI embeddings
 - Sarvam AI audio
 - Optional local translation backends
@@ -80,4 +84,4 @@ make pipeline
 
 ## License
 
-ShambaviLabs - free to use for all educational purposes.
+ShambaviLabs - free to use for all dharmic purposes.
