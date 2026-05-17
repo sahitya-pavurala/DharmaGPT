@@ -21,33 +21,28 @@ document.addEventListener("DOMContentLoaded", () => {
 async function fetchDashboardMetrics() {
   try {
     const response = await fetch("data.json");
-    if (!response.ok) throw new Error("Failed to load metrics JSON data");
-    
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     dashboardData = await response.json();
     populateDashboard(dashboardData);
   } catch (error) {
-    console.error("Dashboard initialization error:", error);
-    document.getElementById("playground-results").innerHTML = `
-      <div class="loading text-red" style="color: #f87171;">
-        <i class="fa-solid fa-triangle-exclamation"></i> Error loading database metrics: ${error.message}
-      </div>
-    `;
+    console.warn("Dashboard metrics unavailable, using static fallback:", error.message);
   }
 }
 
 // Populate UI Elements with loaded JSON data
 function populateDashboard(data) {
-  // Update total chunks counter
-  const totalChunks = data.stats.total_chunks;
-  document.getElementById("stat-chunks").textContent = Number(totalChunks).toLocaleString();
+  const chunksEl = document.getElementById("stat-chunks");
+  if (chunksEl) chunksEl.textContent = Number(data.stats.total_chunks).toLocaleString();
 
-  // Render Kanda Distribution Chart (Chart.js)
-  renderKandaChart(data.stats.kanda_distribution);
+  const chartCanvas = document.getElementById("kandaChart");
+  if (chartCanvas) renderKandaChart(data.stats.kanda_distribution);
 }
 
 // Render the interactive bar chart using Chart.js
 function renderKandaChart(distribution) {
-  const ctx = document.getElementById("kandaChart").getContext("2d");
+  const canvas = document.getElementById("kandaChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
   
   const labels = Object.keys(distribution).map(k => sectionMapping[k] || k);
   const values = Object.values(distribution);
