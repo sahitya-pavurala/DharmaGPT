@@ -18,9 +18,9 @@ from api.auth import require_admin_api_key
 from core.config import get_settings
 from core.insight_store import record_ingestion_run
 from core.postgres_db import connect as pg_connect, ensure_schema as pg_ensure_schema, use_postgres
-from core.retrieval import embed_texts, get_pinecone
+from core.retrieval import embed_texts
 from core.usage_stats import summarize_usage
-from core.vector_sync import sync_pending_chunks_to_pinecone
+from core.vector_sync import sync_pending_chunks_to_pgvector
 
 router = APIRouter()
 settings = get_settings()
@@ -216,7 +216,7 @@ def _aggregate_indexed_sources(limit: int = 300) -> list[dict]:
 @router.post("/admin/vector/upload")
 async def upload_document_to_vector_db(
   file: UploadFile = File(...),
-  vector_db: str = Form("pinecone"),
+  vector_db: str = Form("pgvector"),
   index_name: str = Form(""),
   namespace: str = Form(""),
   dataset_name: str = Form(""),
@@ -230,9 +230,9 @@ async def upload_document_to_vector_db(
   url: str = Form(""),
   _: None = Depends(require_admin_api_key),
 ) -> dict:
-  vector_db = (vector_db or "pinecone").strip().lower()
-  if vector_db != "pinecone":
-    raise HTTPException(status_code=400, detail="vector_db must be 'pinecone'")
+  vector_db = (vector_db or "pgvector").strip().lower()
+  if vector_db != "pgvector":
+    raise HTTPException(status_code=400, detail="vector_db must be 'pgvector'")
 
   filename = file.filename or "upload.txt"
   raw = await file.read()
@@ -245,12 +245,10 @@ async def upload_document_to_vector_db(
   if not chunks:
     raise HTTPException(status_code=400, detail="Could not extract usable text from uploaded file")
 
-  default_index = settings.pinecone_index_name
+  default_index = "pgvector"
   default_namespace = ""
 
   target_index = (index_name or default_index).strip()
-  if not target_index:
-    raise HTTPException(status_code=400, detail="index_name is required")
 
   target_namespace = (namespace or default_namespace).strip()
 
@@ -289,15 +287,20 @@ async def upload_document_to_vector_db(
 
   batch_size = 50
   upserted = 0
-  pc = get_pinecone()
-  index = pc.Index(target_index)
-  for i in range(0, len(records), batch_size):
-    batch = records[i : i + batch_size]
-    if target_namespace:
-      index.upsert(vectors=batch, namespace=target_namespace)
-    else:
-      index.upsert(vectors=batch)
-    upserted += len(batch)
+  with pg_connect() as conn:
+      for record in records:
+          conn.execute(
+              """
+              UPDATE chunk_store 
+              SET embedding = %s::vector, 
+                  vector_status = 'indexed', 
+                  vector_updated_at = NOW(),
+                  vector_error = ''
+              WHERE id = %s
+              """,
+              (record["values"], record["id"])
+          )
+          upserted += 1
 
   if ds_id:
     dataset_store.increment_count(ds_id, upserted)
@@ -364,21 +367,15 @@ async def upload_document_to_vector_db(
 @router.post("/admin/vector/sync")
 async def sync_pending_vectors(
   limit: int = Query(100, ge=1, le=1000),
-  index_name: str = Query(""),
-  namespace: str = Query(""),
   source: str = Query(""),
   dataset_id: str = Query(""),
-  create_index: bool = Query(False),
   _: None = Depends(require_admin_api_key),
 ) -> dict:
   try:
-    return await sync_pending_chunks_to_pinecone(
+    return await sync_pending_chunks_to_pgvector(
       limit=limit,
-      index_name=index_name,
-      namespace=namespace,
       source=source,
       dataset_id=dataset_id,
-      create_index=create_index,
     )
   except Exception as exc:
     raise HTTPException(status_code=502, detail=f"Vector sync failed: {str(exc)[:300]}") from exc
@@ -425,32 +422,14 @@ async def admin_monitor(_: None = Depends(require_admin_api_key)) -> dict:
     except Exception as exc:
       postgres["error"] = str(exc)[:500]
 
-  pinecone: dict = {
-    "configured": bool(settings.pinecone_api_key),
-    "ok": False,
-    "target_index": settings.pinecone_index_name,
-    "indexes": [],
+  pgvector: dict = {
+    "configured": True,
+    "ok": postgres["ok"],
+    "target_index": "pgvector",
+    "indexes": [{"name": "pgvector"}],
   }
-  if settings.pinecone_api_key:
-    try:
-      pc = get_pinecone()
-      indexes = []
-      for item in pc.list_indexes():
-        name = getattr(item, "name", None) or (item.get("name") if isinstance(item, dict) else str(item))
-        index_info = {"name": name}
-        if name == settings.pinecone_index_name:
-          try:
-            stats = pc.Index(name).describe_index_stats()
-            index_info["stats"] = stats.to_dict() if hasattr(stats, "to_dict") else dict(stats)
-          except Exception as exc:
-            index_info["stats_error"] = str(exc)[:500]
-        indexes.append(index_info)
-      pinecone["indexes"] = indexes
-      pinecone["ok"] = True
-    except Exception as exc:
-      pinecone["error"] = str(exc)[:500]
 
-  return {"postgres": postgres, "pinecone": pinecone}
+  return {"postgres": postgres, "pinecone": pgvector}
 
 
 @router.get("/admin/chunks")
@@ -658,7 +637,7 @@ def _feedback_page() -> str:
       <div class="field" style="min-width: 180px;">
         <label for="vectorDb">Vector DB</label>
         <select id="vectorDb" style="border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); padding: 10px 14px;">
-          <option value="pinecone" selected>Pinecone</option>
+          <option value="pgvector" selected>pgvector</option>
         </select>
       </div>
       <div class="field" style="min-width: 220px;">

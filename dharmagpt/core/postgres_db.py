@@ -36,6 +36,7 @@ def connect() -> psycopg.Connection:
 
 
 def ensure_schema(conn: psycopg.Connection) -> None:
+    conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS datasets (
@@ -227,6 +228,41 @@ def ensure_schema(conn: psycopg.Connection) -> None:
         WHERE vector_chunk_id IS NOT NULL
         """
     )
+
+    conn.execute(
+        f"ALTER TABLE chunk_store ADD COLUMN IF NOT EXISTS embedding vector({settings.embedding_dims})"
+    )
+
+
+def query_similar_chunks(
+    vector: list[float],
+    top_k: int = 5,
+    filter_section: str | None = None,
+    filter_source_type: str | None = None,
+) -> list[dict]:
+    if not use_postgres():
+        return []
+    conditions: list[str] = []
+    params: list = [vector]
+    if filter_section:
+        conditions.append("section = %s")
+        params.append(filter_section)
+    if filter_source_type:
+        conditions.append("source_type = %s")
+        params.append(filter_source_type)
+    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    # vector param used twice: once in SELECT for score, once in ORDER BY
+    final_params = [vector] + params[1:] + [vector, top_k]
+    query = f"""
+        SELECT *, 1 - (embedding <=> %s::vector) AS score
+        FROM chunk_store
+        {where_clause}
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+    """
+    with connect() as conn:
+        rows = conn.execute(query, final_params).fetchall()
+    return [dict(row) for row in rows]
 
 
 def _row_to_dict(row: dict) -> dict:

@@ -94,6 +94,38 @@ async def retrieve(
             filter_section=filter_section,
             filter_source_type=filter_source_type,
         )
+    elif backend == "pgvector":
+        from core.postgres_db import query_similar_chunks
+        rows = query_similar_chunks(
+            vector=vector,
+            top_k=top_k,
+            filter_section=filter_section,
+            filter_source_type=filter_source_type,
+        )
+        matches = []
+        for r in rows:
+            meta = dict(r.get("metadata_json") or {})
+            meta.update({
+                "text_preview": r.get("preview") or r.get("text"),
+                "text": r.get("text"),
+                "text_en": r.get("text_en"),
+                "text_en_model": r.get("text_en_model"),
+                "citation": r.get("citation"),
+                "section": r.get("section"),
+                "kanda": r.get("section"),
+                "chapter": r.get("chapter"),
+                "sarga": r.get("chapter"),
+                "verse": r.get("verse"),
+                "source": r.get("source"),
+                "source_type": r.get("source_type"),
+                "start_time_sec": r.get("start_time_sec"),
+                "end_time_sec": r.get("end_time_sec"),
+                "url": r.get("url"),
+            })
+            matches.append({
+                "score": r.get("score", 0.0),
+                "metadata": meta
+            })
     else:
         pc = get_pinecone()
         index = pc.Index(settings.pinecone_index_name)

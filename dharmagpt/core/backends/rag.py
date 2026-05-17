@@ -119,6 +119,50 @@ class _PineconeRetriever:
         return await asyncio.to_thread(self.get_relevant_documents, query, **kwargs)
 
 
+# ── PgVector retriever ────────────────────────────────────────────────────────
+
+class _PgVectorRetriever:
+    def __init__(self, embedder, top_k: int):
+        self._embedder = embedder
+        self._top_k = top_k
+
+    def get_relevant_documents(self, query: str, *, filter_section: str | None = None,
+                               filter_source_type: str | None = None):
+        from langchain_core.documents import Document
+        from core.postgres_db import query_similar_chunks
+
+        vector = self._embedder.embed_query(query)
+        matches = query_similar_chunks(
+            vector=vector,
+            top_k=self._top_k,
+            filter_section=filter_section,
+            filter_source_type=filter_source_type,
+        )
+        docs = []
+        for match in matches:
+            text = (match.get("text") or "").strip()
+            # Combine dicts carefully, avoid passing the huge raw embedding back
+            meta = match.get("metadata_json") or {}
+            meta.update({
+                "score": match.get("score", 0.0),
+                "source": match.get("source"),
+                "source_type": match.get("source_type"),
+                "citation": match.get("citation"),
+                "section": match.get("section"),
+                "chapter": match.get("chapter"),
+                "verse": match.get("verse"),
+                "start_time_sec": match.get("start_time_sec"),
+                "end_time_sec": match.get("end_time_sec")
+            })
+            docs.append(Document(page_content=text, metadata=meta))
+        return docs
+
+    async def aget_relevant_documents(self, query: str, **kwargs):
+        import asyncio
+        return await asyncio.to_thread(self.get_relevant_documents, query, **kwargs)
+
+
+
 # ── LCEL RAG chain ────────────────────────────────────────────────────────────
 
 def _build_chain(retriever, llm, prompts_module):
@@ -206,9 +250,13 @@ def get_rag_chain():
         retriever = _PineconeRetriever(embedder=embedder, settings=s, top_k=s.rag_top_k)
         log.info("rag_chain_built", backend="pinecone", embedder=type(embedder).__name__)
 
+    elif backend == "pgvector":
+        retriever = _PgVectorRetriever(embedder=embedder, top_k=s.rag_top_k)
+        log.info("rag_chain_built", backend="pgvector", embedder=type(embedder).__name__)
+
     else:
         raise ValueError(
-            f"Unknown RAG_BACKEND: {backend!r}. Valid values: local | pinecone"
+            f"Unknown RAG_BACKEND: {backend!r}. Valid values: local | pinecone | pgvector"
         )
 
     return _build_chain(retriever, llm, prompts_module)

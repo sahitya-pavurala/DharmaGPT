@@ -41,8 +41,10 @@ async def test_retrieve_returns_filtered_results():
 
     from core import retrieval
 
+    original_rag_backend = retrieval.settings.rag_backend
     original_backend = retrieval.settings.vector_db_backend
     original_min_score = retrieval.settings.rag_min_score
+    retrieval.settings.rag_backend = "pinecone"
     retrieval.settings.vector_db_backend = "pinecone"
     retrieval.settings.rag_min_score = 0.35
     try:
@@ -51,6 +53,7 @@ async def test_retrieve_returns_filtered_results():
             mock_pc.return_value.Index.return_value.query.return_value = mock_results
             results = await retrieve("Where did Hanuman find Sita?")
     finally:
+        retrieval.settings.rag_backend = original_rag_backend
         retrieval.settings.vector_db_backend = original_backend
         retrieval.settings.rag_min_score = original_min_score
 
