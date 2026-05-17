@@ -78,10 +78,6 @@ make pipeline
 
 - [Architecture](ARCHITECTURE.md)
 - [Contributing](CONTRIBUTING.md)
-- [Audio translation pipeline](docs/blog_01_audio_translation_pipeline.md)
-- [RAG validation pipeline](docs/blog_02_rag_validation_pipeline.md)
-- [Offline-first testing](docs/blog_03_offline_first_testing.md)
-- [Local-first translation](docs/blog_04_local_first_translation.md)
 
 ## License
 
