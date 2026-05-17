@@ -58,6 +58,35 @@ def _chunk_text(raw: str, chunk_words: int = 650, overlap_words: int = 80) -> li
   return chunks
 
 
+_HEADER_KEYS = {"title", "source", "section", "date", "translator", "author", "language"}
+
+
+def _parse_translation_header(decoded: str) -> tuple[dict, str]:
+  """Parse optional Key: Value header block from a translation txt file.
+
+  Header ends at the first '---' separator line or at the first line that
+  doesn't look like a header field. Returns (meta_dict, body_text).
+  Recognised keys: Title, Source, Section, Date, Translator, Author, Language.
+  """
+  meta: dict = {}
+  lines = decoded.splitlines()
+  body_start = 0
+  for i, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped == "---":
+      body_start = i + 1
+      break
+    if ":" in stripped:
+      key, _, val = stripped.partition(":")
+      if key.strip().lower() in _HEADER_KEYS:
+        meta[key.strip().lower()] = val.strip()
+        body_start = i + 1
+        continue
+    body_start = i
+    break
+  return meta, "\n".join(lines[body_start:]).strip()
+
+
 def _extract_pdf(raw: bytes) -> str:
   try:
     from pypdf import PdfReader
@@ -358,6 +387,177 @@ async def upload_document_to_vector_db(
     "source_title": resolved_title,
     "source_file_path": source_file_path,
     "content_sha256": content_sha256,
+  }
+
+
+@router.post("/admin/vector/upload/batch", status_code=200)
+async def batch_upload_translations(
+  files: list[UploadFile] = File(...),
+  dataset_name: str = Form(""),
+  default_source: str = Form(""),
+  index_name: str = Form(""),
+  namespace: str = Form(""),
+  _: None = Depends(require_admin_api_key),
+) -> dict:
+  if len(files) > 100:
+    raise HTTPException(status_code=400, detail="Maximum 100 files per batch")
+
+  target_index = (index_name or settings.pinecone_index_name or "").strip()
+  if not target_index:
+    raise HTTPException(status_code=400, detail="index_name is required")
+  target_namespace = namespace.strip()
+  ds_id = dataset_name.strip()
+  if ds_id:
+    dataset_store.register(ds_id)
+
+  pc = get_pinecone()
+  index = pc.Index(target_index)
+  now = datetime.now(timezone.utc).isoformat()
+
+  results: list[dict] = []
+  total_chunks = 0
+  total_vectors = 0
+
+  for upload in files:
+    filename = upload.filename or "upload.txt"
+    raw = await upload.read()
+    file_result: dict = {"file": filename, "status": "ok", "chunks_created": 0, "word_count": 0, "skipped_chunks": 0}
+
+    if not raw:
+      file_result.update({"status": "error", "error": "empty file"})
+      results.append(file_result)
+      continue
+
+    decoded = raw.decode("utf-8", errors="ignore")
+    header, body = _parse_translation_header(decoded)
+
+    if not body:
+      file_result.update({"status": "error", "error": "no body text after header"})
+      results.append(file_result)
+      continue
+
+    # Resolve metadata — header fields take precedence, filename is fallback
+    stem = Path(filename).stem
+    resolved_title = header.get("title") or stem.replace("_", " ").title()
+    resolved_source = (
+      header.get("source")
+      or (default_source.strip() or None)
+      or re.sub(r"[^a-z0-9]+", "_", resolved_title.lower()).strip("_")
+      or stem
+    )
+    section = header.get("section", "")
+    translator = header.get("translator", "")
+    language = header.get("language", "en")
+
+    normalized = _normalize_text(body)
+    words = normalized.split()
+    total_words = len(words)
+    file_result["word_count"] = total_words
+
+    chunks = _chunk_text(body)
+    # Count how many windows _chunk_text considered vs kept
+    step = max(1, 650 - 80)
+    windows = max(1, len(words)) // step + (1 if len(words) % step else 0) if len(words) > 650 else 1
+    file_result["skipped_chunks"] = max(0, windows - len(chunks))
+
+    if not chunks:
+      file_result.update({
+        "status": "error",
+        "error": f"text too short to chunk ({total_words} words, need ≥20)",
+      })
+      results.append(file_result)
+      continue
+
+    try:
+      vectors, embedding_backend = await embed_texts(chunks)
+    except Exception as exc:
+      file_result.update({"status": "error", "error": f"embedding failed: {exc}"})
+      results.append(file_result)
+      continue
+
+    source_file_path, content_sha256 = _save_source_file(filename, raw)
+    doc_id = uuid.uuid4().hex[:12]
+    records = []
+    for i, (chunk, vec) in enumerate(zip(chunks, vectors), start=1):
+      chunk_id = f"admin-batch-{doc_id}-{i}"
+      meta = {
+        "source_type": "translation",
+        "citation": resolved_title,
+        "source": resolved_source,
+        "source_title": resolved_title,
+        "language": language,
+        "section": section,
+        "translator": translator,
+        "text_preview": chunk[:500],
+      }
+      if ds_id:
+        meta["dataset_id"] = ds_id
+      upsert_chunk(chunk_id, text=chunk, metadata=meta)
+      records.append({"id": chunk_id, "values": vec, "metadata": meta})
+
+    batch_size = 50
+    upserted = 0
+    for i in range(0, len(records), batch_size):
+      batch = records[i : i + batch_size]
+      if target_namespace:
+        index.upsert(vectors=batch, namespace=target_namespace)
+      else:
+        index.upsert(vectors=batch)
+      upserted += len(batch)
+
+    if ds_id:
+      dataset_store.increment_count(ds_id, upserted)
+
+    run_id = record_ingestion_run(
+      kind="translation",
+      source=resolved_source,
+      source_title=resolved_title,
+      file_name=filename,
+      language=language,
+      dataset_id=ds_id,
+      status="ok",
+      chunks=len(chunks),
+      vectors=upserted,
+      vector_db="pinecone",
+      embedding_backend=embedding_backend,
+      metadata={"index_name": target_index, "namespace": target_namespace,
+                 "content_sha256": content_sha256, "section": section},
+      finished_at=now,
+    )
+    _append_upload_audit({
+      "timestamp": now, "run_id": run_id, "role": "batch_translation",
+      "file_path": source_file_path, "original_filename": filename,
+      "bytes": len(raw), "sha256": content_sha256,
+      "source": resolved_source, "source_title": resolved_title,
+      "language": language, "section": section, "translator": translator,
+      "vector_db": "pinecone", "index_name": target_index,
+      "namespace": target_namespace, "chunks_created": len(chunks),
+      "vectors_upserted": upserted, "embedding_backend": embedding_backend,
+    })
+
+    file_result.update({
+      "chunks_created": len(chunks),
+      "vectors_upserted": upserted,
+      "source": resolved_source,
+      "source_title": resolved_title,
+      "section": section,
+      "embedding_backend": embedding_backend,
+    })
+    total_chunks += len(chunks)
+    total_vectors += upserted
+    results.append(file_result)
+
+  errors = [r for r in results if r["status"] == "error"]
+  return {
+    "status": "ok" if not errors else "partial" if len(errors) < len(results) else "error",
+    "files_processed": len(results),
+    "files_ok": len(results) - len(errors),
+    "files_error": len(errors),
+    "total_chunks_created": total_chunks,
+    "total_vectors_upserted": total_vectors,
+    "dataset_id": ds_id or None,
+    "index_name": target_index,
+    "results": results,
   }
 
 
@@ -1297,17 +1497,10 @@ def _admin_page() -> str:
         <div><label>Section (optional)</label><input id="au-section" type="text" placeholder="e.g. Bala Kanda"/></div>
         <div><label>Description (optional)</label><input id="au-desc" type="text" placeholder="e.g. Part 1 clip 42"/></div>
       </div>
-<<<<<<< HEAD
       <button class="btn-primary" id="au-upload-btn" onclick="uploadAudio()">Transcribe & Stage</button>
       <div class="notice" id="au-notice"></div>
       <div class="progress-list" id="au-progress" style="display:none"></div>
     </div>
-=======
-	      <button class="btn-primary" id="au-upload-btn" onclick="uploadAudio()">Transcribe & Stage</button>
-	      <div class="notice" id="au-notice"></div>
-	      <div class="progress-list" id="au-progress" style="display:none"></div>
-	    </div>
->>>>>>> main
 
     <hr class="divider"/>
 
@@ -1324,6 +1517,34 @@ def _admin_page() -> str:
       </div>
       <button class="btn-primary" onclick="uploadDoc()">Chunk & Index</button>
       <div class="notice" id="doc-notice"></div>
+    </div>
+
+    <hr class="divider"/>
+
+    <div class="card">
+      <div class="section-title">Batch Translation Upload <span style="font-size:12px;color:var(--muted);font-weight:400">(up to 100 .txt files — one per pravachanam)</span></div>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px">Each file may start with an optional header block (<code>Title:</code>, <code>Source:</code>, <code>Section:</code>, <code>Date:</code>, <code>Translator:</code>) followed by a <code>---</code> separator, then the full English translation.</p>
+      <div class="row three">
+        <div><label>Translation Files (.txt)</label><input type="file" id="batch-files" accept=".txt" multiple/></div>
+        <div><label>Dataset Name</label><input id="batch-dataset" type="text" placeholder="e.g. ramayanam-chaganti"/></div>
+        <div><label>Default Source ID <span style="font-weight:400;color:var(--muted)">(if not in header)</span></label><input id="batch-source" type="text" placeholder="e.g. hh_chinnajeeyar_ramayana"/></div>
+      </div>
+      <button class="btn-primary" onclick="batchUpload()">Upload & Index All</button>
+      <div class="notice" id="batch-notice"></div>
+      <div id="batch-results" style="display:none;margin-top:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px" id="batch-summary"></div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px" id="batch-table">
+          <thead><tr style="text-align:left;border-bottom:1px solid var(--line)">
+            <th style="padding:6px 8px">File</th>
+            <th style="padding:6px 8px">Status</th>
+            <th style="padding:6px 8px">Words</th>
+            <th style="padding:6px 8px">Chunks</th>
+            <th style="padding:6px 8px">Source</th>
+            <th style="padding:6px 8px">Section</th>
+          </tr></thead>
+          <tbody id="batch-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -1457,20 +1678,12 @@ function showTab(name) {
   document.querySelectorAll(".pane").forEach(p => p.classList.remove("active"));
   document.getElementById("pane-"+name).classList.add("active");
   if(name==="datasets") loadDatasets();
-<<<<<<< HEAD
   if(name==="sources") loadSources();
   if(name==="stats") loadStats();
   if(name==="monitor") { loadMonitor(); loadAudioJobs(); loadChunks(); loadNotifications(); }
   if(name==="gold") loadGold();
   if(name==="translations") loadTranslations();
 }
-=======
-	  if(name==="sources") loadSources();
-	  if(name==="stats") loadStats();
-		  if(name==="monitor") { loadMonitor(); loadAudioJobs(); loadChunks(); loadNotifications(); }
-	  if(name==="gold") loadGold();
-	}
->>>>>>> main
 
 function setNotice(id, msg, err=false) {
   const el = document.getElementById(id);
@@ -1755,10 +1968,6 @@ async function deleteDs(name) {
 	const AUDIO_STEPS = [
 	  ["upload", "Uploading audio to server"],
 	  ["transcribe", "Transcribing speech"],
-<<<<<<< HEAD
-=======
-	  ["translate", "Translating transcript when needed"],
->>>>>>> main
 	  ["stage", "Writing chunks to Postgres"],
 	  ["done", "Ready for Pinecone sync"]
 	];
@@ -1877,18 +2086,10 @@ async function uploadAudio() {
   const progressTimer = setInterval(() => {
     const states = [
       ["transcribe", ["upload"], "Audio uploaded. Transcribing speech…"],
-<<<<<<< HEAD
       ["stage", ["upload","transcribe"], "Preparing chunks and writing to Postgres…"]
     ];
     const elapsed = Date.now() - startedAt;
     const idx = elapsed > 12000 ? 1 : elapsed > 2500 ? 0 : -1;
-=======
-      ["translate", ["upload","transcribe"], "Transcript received. Translating when needed…"],
-      ["stage", ["upload","transcribe","translate"], "Preparing chunks and writing to Postgres…"]
-    ];
-    const elapsed = Date.now() - startedAt;
-    const idx = elapsed > 45000 ? 2 : elapsed > 12000 ? 1 : elapsed > 2500 ? 0 : -1;
->>>>>>> main
     if(idx >= 0) {
       renderAudioProgress(states[idx][0], states[idx][1]);
       setNotice("au-notice", states[idx][2]);
@@ -1900,13 +2101,8 @@ async function uploadAudio() {
     if(!r.ok){ const b=await r.json(); throw new Error(b.detail||r.statusText); }
     const d = await r.json();
     clearInterval(progressTimer);
-<<<<<<< HEAD
     renderAudioProgress("done", ["upload","transcribe","stage","done"]);
     setNotice("au-notice",`Done. ${d.chunks_created} chunks staged in Postgres.`);
-=======
-    renderAudioProgress("done", ["upload","transcribe","translate","stage","done"]);
-    setNotice("au-notice",`Done. ${d.chunks_created} chunks staged in Postgres. Translation: ${d.translation_backend||"none"}.`);
->>>>>>> main
     showTab("monitor");
   } catch(e){
     clearInterval(progressTimer);
@@ -1934,6 +2130,56 @@ async function uploadDoc() {
     setNotice("doc-notice",`Done. ${d.vectors_upserted} chunks indexed to ${d.vector_db}${d.dataset_id?" (dataset: "+d.dataset_id+")":""}.`);
     showTab("datasets");
   } catch(e){ setNotice("doc-notice","Error: "+e.message,true); }
+}
+
+// ── Batch translation upload ───────────────────────────────────────────────────
+async function batchUpload() {
+  const input = document.getElementById("batch-files");
+  const files = input.files;
+  if (!files || files.length === 0) { setNotice("batch-notice", "Choose at least one .txt file.", true); return; }
+  if (files.length > 100) { setNotice("batch-notice", "Maximum 100 files per batch.", true); return; }
+
+  const dataset = document.getElementById("batch-dataset").value.trim();
+  const defaultSource = document.getElementById("batch-source").value.trim();
+
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  if (dataset) fd.append("dataset_name", dataset);
+  if (defaultSource) fd.append("default_source", defaultSource);
+
+  setNotice("batch-notice", `Uploading ${files.length} file(s)…`);
+  document.getElementById("batch-results").style.display = "none";
+
+  try {
+    const r = await fetch("/admin/vector/upload/batch", { method: "POST", headers: adminHeaders(), body: fd });
+    if (!r.ok) { const b = await r.json(); throw new Error(b.detail || r.statusText); }
+    const d = await r.json();
+
+    const statusColor = d.status === "ok" ? "var(--green,#22c55e)" : d.status === "partial" ? "orange" : "var(--red,#ef4444)";
+    document.getElementById("batch-summary").innerHTML =
+      `<span style="color:${statusColor}">&#9679;</span> ` +
+      `${d.files_ok}/${d.files_processed} files indexed &mdash; ` +
+      `${d.total_chunks_created} chunks, ${d.total_vectors_upserted} vectors` +
+      (d.dataset_id ? ` &mdash; dataset: <strong>${esc(d.dataset_id)}</strong>` : "");
+
+    const tbody = document.getElementById("batch-tbody");
+    tbody.innerHTML = d.results.map(row => {
+      const ok = row.status === "ok";
+      const color = ok ? "" : "color:var(--red,#ef4444)";
+      return `<tr style="border-bottom:1px solid var(--line);${color}">
+        <td style="padding:5px 8px">${esc(row.file)}</td>
+        <td style="padding:5px 8px">${ok ? "&#10003;" : "&#10007; " + esc(row.error || "error")}</td>
+        <td style="padding:5px 8px">${row.word_count ?? ""}</td>
+        <td style="padding:5px 8px">${row.chunks_created ?? ""}${row.skipped_chunks ? " <span style='color:var(--muted)'>(-"+row.skipped_chunks+" skipped)</span>" : ""}</td>
+        <td style="padding:5px 8px">${esc(row.source || "")}</td>
+        <td style="padding:5px 8px">${esc(row.section || "")}</td>
+      </tr>`;
+    }).join("");
+
+    document.getElementById("batch-results").style.display = "block";
+    setNotice("batch-notice", "");
+    if (d.status === "ok") showTab("datasets");
+  } catch(e) { setNotice("batch-notice", "Batch upload failed: " + e.message, true); }
 }
 
 // ── Query test ────────────────────────────────────────────────────────────────
