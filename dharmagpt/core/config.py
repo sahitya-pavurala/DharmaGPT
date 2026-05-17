@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:8081,http://localhost:8080,http://localhost:3000,null"
 
     # Postgres (optional — leave empty to use SQLite)
-    database_url: str = ""
+    database_url: str = "postgresql://postgres:password@localhost:5432/dharmagpt"
 
     @property
     def cors_allow_all_dev(self) -> bool:
@@ -38,9 +38,9 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     llm_timeout_sec: int = 120
 
-    # RAG_BACKEND: pinecone | local
-    rag_backend: str = "pinecone"
-    vector_db_backend: str = "pinecone"  # legacy alias kept for backward compat
+    # RAG_BACKEND: pgvector | pinecone | local
+    rag_backend: str = "pgvector"
+    vector_db_backend: str = "pgvector"  # legacy alias kept for backward compat
     pinecone_index_name: str = "dharma-gpt"
     pinecone_environment: str = "us-east-1"
 

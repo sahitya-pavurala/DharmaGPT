@@ -52,7 +52,7 @@ logs/
 # Local Postgres install and data
 .local-postgres/
 
-# Local vector stores are not used in beta; Pinecone is the vector database.
+# Local vector stores (pgvector runs in PostgreSQL; these SQLite files are local-only)
 knowledge/stores/local_vectors.sqlite3
 knowledge/stores/chunk_store.sqlite3
 knowledge/stores/datasets.sqlite3
@@ -69,8 +69,8 @@ run_batch.bat
 htmlcov/
 .coverage
 
-# Local docs (blog drafts, notes — not for repo)
-docs/
+# Local docs — exclude only private/draft content, not the GitHub Pages site
+docs/blog_benchmarking_sarvam_anthropic_openai.md
 
 # Local beta-server administration (sensitive server info)
 scripts/beta_*.sh

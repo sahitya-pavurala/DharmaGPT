@@ -15,11 +15,10 @@ indic-nlp-library==0.92
 regex==2026.4.4
 mock==5.2.0
 
-# LangChain core + provider adapters
+# LangChain is intentionally narrow here: chat model provider adapters only.
+# RAG orchestration, retrieval, citation logic, and response shaping live in DharmaGPT code.
 langchain-core>=0.3.0
 langchain-anthropic>=0.3.0
-langchain-openai>=0.2.0
-langchain-ollama>=0.2.0          # optional: only needed for LLM_BACKEND=ollama
 
 # LLM + Embeddings (direct SDKs — still used for non-LC paths)
 anthropic==0.97.0

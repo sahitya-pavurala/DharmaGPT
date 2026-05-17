@@ -9,19 +9,24 @@ Caller (any client)
     │  REST (JSON)
     ▼
 FastAPI  (dharmagpt/api/)
-    ├── Query → RAG Engine → Pinecone → Claude → Response
-    └── Audio → Sarvam STT → Chunker → Pinecone
+    ├── Query → RAG Engine → pgvector → Claude → Response
+    └── Audio → Sarvam STT → Chunker → pgvector
 ```
 
 ## Data Flow: Query
 
 1. Caller sends `POST /api/v1/query` with `{query, mode, history, language, filter_section}`
 2. Backend embeds query via OpenAI `text-embedding-3-large`
-3. Pinecone returns top-5 most similar chunks; filtered by `section` if `filter_section` is set
+3. pgvector returns top-5 most similar chunks; filtered by `section` if `filter_section` is set
 4. Each chunk's passage header is enriched with `Ch. N, V. N` when not already in the citation string
 5. Passages are injected into Claude's system prompt with citation rules: cite to the finest level shown, never fabricate
 6. Claude generates an answer grounded in those passages, with inline verse-level citations
 7. Response returned with `answer` + `sources[]` (citation, section, chapter, verse, score)
+
+LangChain is used only as a provider adapter at the chat-model boundary. The
+retrieval flow, context formatting, citation enrichment, prompts, and API
+response shape are owned by DharmaGPT code so grounding behavior remains easy
+to inspect and test.
 
 ## Data Flow: Audio Ingestion
 
@@ -44,7 +49,7 @@ FastAPI  (dharmagpt/api/)
 - Fallback: sentence-boundary via danda (।) detection
 - Metadata: start/end timestamps, speaker type, has_shloka flag
 
-## Pinecone Index Schema
+## Vector Schema (pgvector)
 
 ```
 Vector: float[3072]  (text-embedding-3-large)
@@ -91,6 +96,6 @@ Citation strings are built at normalization time and include all available level
 
 ## Scaling Considerations
 
-- Pinecone serverless scales automatically; no ops needed
+- pgvector runs on PostgreSQL; scale vertically or add read replicas as query volume grows
 - FastAPI workers can be added behind a load balancer (Railway, Render, AWS)
 - Audio transcription is the bottleneck — queue long files with Celery + Redis

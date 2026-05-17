@@ -1,5 +1,9 @@
 """
-LLM backend registry — powered by LangChain BaseChatModel.
+LLM backend registry.
+
+DharmaGPT keeps the product RAG flow in core.rag_engine and core.retrieval.
+LangChain is used here as a narrow provider adapter for chat models, not as
+the owner of orchestration or citation logic.
 
 Default: anthropic  (LLM_BACKEND in .env)
 No fallback — if the configured backend fails, the exception propagates immediately.
@@ -9,6 +13,7 @@ Supported values:
 """
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
 import structlog
 
@@ -45,3 +50,18 @@ def get_llm():
         max_tokens=1024,
         timeout=s.llm_timeout_sec,
     )
+
+
+def invoke_chat_model(system: str, user: str) -> str:
+    """Call the configured LangChain chat model and return plain text."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    response = get_llm().invoke([
+        SystemMessage(content=system),
+        HumanMessage(content=user),
+    ])
+    return response.content if hasattr(response, "content") else str(response)
+
+
+async def ainvoke_chat_model(system: str, user: str) -> str:
+    return await asyncio.to_thread(invoke_chat_model, system, user)

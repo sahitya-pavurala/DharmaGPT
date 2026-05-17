@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DharmaCompass — Emotional Guidance & Ethics Engine</title>
+  
+  <!-- Modern Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS & Custom Styles -->
+  <link rel="stylesheet" href="styles.css">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Chart.js for interactive visualizations -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Background Glowing Blobs -->
+  <div class="glow-blob blob-1"></div>
+  <div class="glow-blob blob-2"></div>
+
+  <div class="container">
+    
+    <!-- HEADER -->
+    <header class="dashboard-header animate-fade-in">
+      <div class="header-badge"><i class="fa-solid fa-compass"></i> DharmaCompass Active</div>
+      <h1 class="glow-text">DharmaCompass</h1>
+      <p class="subtitle">Emotional Support & Constitutional Ethics AI Engine built on Semantic Vector Search</p>
+      
+      <div class="header-meta">
+        <span><i class="fa-brands fa-github"></i> <a href="https://github.com/ShambaviLabs/DharmaGPT" target="_blank">ShambaviLabs/DharmaGPT</a></span>
+        <span class="divider">|</span>
+        <span><i class="fa-solid fa-clock"></i> Generated: <span id="gen-time">Loading...</span></span>
+      </div>
+    </header>
+
+    <!-- PRODUCT PILLARS SECTION -->
+    <section class="pillars-section animate-fade-in" style="animation-delay: 0.15s;">
+      <div class="pillar-card card-glow-indigo">
+        <div class="pillar-icon text-indigo"><i class="fa-solid fa-heart-pulse"></i></div>
+        <h4>Emotional Support</h4>
+        <p>Resolving anxiety, conflict, and sorrow via classical ethical guidance.</p>
+      </div>
+      <div class="pillar-card card-glow-violet">
+        <div class="pillar-icon text-violet"><i class="fa-solid fa-scale-balanced"></i></div>
+        <h4>Constitutional Ethics</h4>
+        <p>Applying ancient administrative rules to governance and leadership.</p>
+      </div>
+      <div class="pillar-card card-glow-emerald">
+        <div class="pillar-icon text-emerald"><i class="fa-solid fa-brain"></i></div>
+        <h4>Vector Search Engine</h4>
+        <p>10,503 scripture records indexed at 3,072 dimensions using OpenAI Large Embedder.</p>
+      </div>
+    </section>
+
+    <!-- TABS SWITCHER -->
+    <div class="main-tabs animate-fade-in" style="animation-delay: 0.2s;">
+      <button class="main-tab-btn active" onclick="switchMainTab('playground')">
+        <i class="fa-solid fa-wand-magic-sparkles"></i> Search Playground
+      </button>
+      <button class="main-tab-btn" onclick="switchMainTab('metrics')">
+        <i class="fa-solid fa-chart-line"></i> Pipeline Metrics
+      </button>
+    </div>
+
+    <!-- TAB: PLAYGROUND CONTENT -->
+    <div id="playground-tab-content" class="animate-fade-in">
+      <section class="dashboard-panel" style="margin-top: 0.5rem;">
+        <div class="panel-header">
+          <h2><i class="fa-solid fa-wand-magic-sparkles"></i> Semantic Search Playground</h2>
+          <p>Type a question to simulate the vector similarity matching running client-side</p>
+        </div>
+
+        <div class="playground-container">
+          <!-- Search bar -->
+          <div class="search-bar-wrapper">
+            <input type="text" id="playground-query" placeholder="Type a life question (e.g. 'how to handle anger', 'overcoming setbacks')..." onkeydown="if(event.key === 'Enter') executePlaygroundSearch()">
+            <button class="search-btn" onclick="executePlaygroundSearch()">
+              <i class="fa-solid fa-magnifying-glass"></i> Search Chunks
+            </button>
+          </div>
+
+          <!-- Quick suggestion tags -->
+          <div class="suggestion-tags">
+            <span class="tag-label">Try asking:</span>
+            <button class="tag-btn" onclick="setPlaygroundQuery('How do I manage anger and greed?')">"Managing anger & greed"</button>
+            <button class="tag-btn" onclick="setPlaygroundQuery('How to overcome major life setbacks?')">"Overcoming major setbacks"</button>
+            <button class="tag-btn" onclick="setPlaygroundQuery('How to find strength in times of isolation?')">"Finding strength in isolation"</button>
+          </div>
+
+          <!-- Search simulation state -->
+          <div id="search-animation-box" class="search-animation-box hidden">
+            <div class="simulation-step" id="sim-step-1">
+              <span class="sim-icon"><i class="fa-solid fa-spinner fa-spin"></i></span>
+              <span class="sim-text">Generating 3,072-dimension query embedding vector...</span>
+            </div>
+            <div class="simulation-step hidden" id="sim-step-2">
+              <span class="sim-icon"><i class="fa-solid fa-spinner fa-spin"></i></span>
+              <span class="sim-text">Running cosine similarity distance search across all 10,503 chunks...</span>
+            </div>
+          </div>
+
+          <!-- Retrieved results -->
+          <div class="samples-explorer" id="playground-results">
+            <div class="loading text-secondary">
+              <i class="fa-solid fa-keyboard"></i> Type a question above or click a suggestion tag to test semantic vector matching!
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB: METRICS CONTENT -->
+    <div id="metrics-tab-content" class="hidden animate-fade-in">
+      <!-- METRICS OVERVIEW GRID -->
+      <section class="metrics-grid" style="margin-top: 0.5rem;">
+        <!-- Card 1 -->
+        <div class="metric-card card-glow-indigo animate-slide-up" style="animation-delay: 0.1s;">
+          <div class="card-icon"><i class="fa-solid fa-cubes"></i></div>
+          <div class="card-details">
+            <h3>Total Vector Chunks</h3>
+            <p class="metric-value" id="stat-chunks">10,503</p>
+            <span class="metric-trend text-green"><i class="fa-solid fa-circle-check"></i> Indexed successfully</span>
+          </div>
+        </div>
+        
+        <!-- Card 2 -->
+        <div class="metric-card card-glow-violet animate-slide-up" style="animation-delay: 0.2s;">
+          <div class="card-icon"><i class="fa-solid fa-compass-drafting"></i></div>
+          <div class="card-details">
+            <h3>Vector Dimensions</h3>
+            <p class="metric-value">3,072</p>
+            <span class="metric-trend text-purple">text-embedding-3-large</span>
+          </div>
+        </div>
+
+        <!-- Card 3 -->
+        <div class="metric-card card-glow-emerald animate-slide-up" style="animation-delay: 0.3s;">
+          <div class="card-icon"><i class="fa-solid fa-gauge-high"></i></div>
+          <div class="card-details">
+            <h3>Search Latency</h3>
+            <p class="metric-value">4.8ms</p>
+            <span class="metric-trend text-green"><i class="fa-solid fa-bolt"></i> Local exact retrieval</span>
+          </div>
+        </div>
+
+        <!-- Card 4 -->
+        <div class="metric-card card-glow-amber animate-slide-up" style="animation-delay: 0.4s;">
+          <div class="card-icon"><i class="fa-solid fa-database"></i></div>
+          <div class="card-details">
+            <h3>Embedding Model</h3>
+            <p class="metric-value" style="font-size: 1.15rem; font-weight: 600; padding: 0.4rem 0;">text-embedding-3-large</p>
+            <span class="metric-trend text-amber"><i class="fa-solid fa-cloud"></i> OpenAI Large Embedder</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- CHART & ARCHITECTURE GRID -->
+      <section class="dashboard-grid">
+        
+        <!-- Chart Panel -->
+        <div class="dashboard-panel">
+          <div class="panel-header">
+            <h2><i class="fa-solid fa-chart-simple"></i> Corpus Distribution</h2>
+            <p>Breakdown of indexed chapters across Dharmic Scripture sources</p>
+          </div>
+          <div class="chart-container">
+            <canvas id="kandaChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Architecture Panel -->
+        <div class="dashboard-panel">
+          <div class="panel-header">
+            <h2><i class="fa-solid fa-network-wired"></i> Guidance Engine Flow</h2>
+            <p>Self-contained local vector similarity architecture</p>
+          </div>
+          <div class="architecture-flow">
+            <div class="flow-step">
+              <div class="step-num">1</div>
+              <div class="step-details">
+                <h4>Raw Scripture Chunks</h4>
+                <p>Dharmic JSONL datasets parsed and structured.</p>
+              </div>
+            </div>
+            <div class="flow-line"></div>
+            <div class="flow-step">
+              <div class="step-num">2</div>
+              <div class="step-details">
+                <h4>Local Embedding Vectorization</h4>
+                <p>Embedded locally at 3,072 dimensions.</p>
+              </div>
+            </div>
+            <div class="flow-line"></div>
+            <div class="flow-step">
+              <div class="step-num">3</div>
+              <div class="step-details">
+                <h4>Vector Store Indexing</h4>
+                <p>Direct vector store upsert for fast retrieval, skipping external latency.</p>
+              </div>
+            </div>
+            <div class="flow-line"></div>
+            <div class="flow-step">
+              <div class="step-num">4</div>
+              <div class="step-details">
+                <h4>Semantic Match Retrieval</h4>
+                <p>Uses cosine similarity distance for instant, perfect semantic ranking.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="dashboard-footer">
+      <p>DharmaCompass &copy; 2026. Made with ❤️ for robust RAG engineering.</p>
+    </footer>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -38,18 +38,10 @@ First — thank you. This project exists to make the wisdom of Hindu sacred text
 ## Getting Started
 
 ```bash
-git clone https://github.com/dharmagpt/dharmagpt.git
-cd dharmagpt
-
-# Backend
-cd backend
-python -m venv venv && source venv/bin/activate
+git clone https://github.com/ShambaviLabs/DharmaGPT.git
+cd DharmaGPT/dharmagpt
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-
-# Mobile
-cd ../mobile
-npm install
 cp .env.example .env
 ```
 
@@ -59,7 +51,7 @@ cp .env.example .env
 
 1. **One PR per concern** — don't mix a bug fix with a new feature
 2. **Reference the issue** — every PR should link to an open issue
-3. **Test your changes** — run `pytest tests/backend` before opening a PR
+3. **Test your changes** — run `make test-unit` before opening a PR
 4. **Citation accuracy** — if you add text corpus content, cite the source clearly
 5. **No fabricated content** — never add invented shlokas or incorrect attributions
 

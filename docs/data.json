@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-05-17 04:14:32 UTC",
+  "pipeline_metadata": {
+    "project_name": "DharmaCompass",
+    "description": "Enterprise-grade emotional support and constitutional ethics RAG engine built on local PostgreSQL + pgvector",
+    "repository": "https://github.com/ShambaviLabs/DharmaGPT",
+    "vector_backend": "PostgreSQL (pgvector/pg16)",
+    "embedding_dims": 3072,
+    "indexing_mode": "Exact k-NN Cosine Distance (<=>)",
+    "average_latency_ms": 4.8
+  },
+  "stats": {
+    "total_documents": 6,
+    "total_chunks": 10503,
+    "total_vectors": 10503,
+    "average_words_per_chunk": 0,
+    "kanda_distribution": {
+      "Yuddha Kanda": 3537,
+      "Ayodhya Kanda": 2717,
+      "Aranya Kanda": 2210,
+      "Sundara Kanda": 1764,
+      "Kishkindha Kanda": 140,
+      "Bala Kanda": 135
+    }
+  },
+  "samples": {
+    "Bala Kanda": [
+      {
+        "id": "admin-doc-8e78f7002ece-1",
+        "text": "Divine sage Narada arrives at the hermitage of Sage Valmiki in order to enlighten him and keep him informed of his duty to author the epic poem Ramayana. In the dialogue between these two sages, Valmiki elicits from Narada about most virtuous person ...",
+        "citation": "Valmiki Ramayana",
+        "section": "Bala Kanda"
+      },
+      {
+        "id": "admin-doc-8e78f7002ece-2",
+        "text": "as well... \"He is an adept one, moralist, learned, propitious, and a destroyer of enemies. His arms are lengthy, and his neck is like a conch-shell, and cheekbones high... \"He is lion-chested, thick-shouldered, knee-length are his arms, and his is lo...",
+        "citation": "Valmiki Ramayana",
+        "section": "Bala Kanda"
+      },
+      {
+        "id": "admin-doc-8e78f7002ece-3",
+        "text": "among ladies, a possessor of all best qualities befitting to an ideal lady, the one who is as though fashioned by a Divine marvel, born in Janaka's family and became Dasharatha's daughter-in-law, and she who is the loving wife and an ever-amiable alt...",
+        "citation": "Valmiki Ramayana",
+        "section": "Bala Kanda"
+      },
+      {
+        "id": "admin-doc-8e78f7002ece-4",
+        "text": "decidedly about the elimination of demons... \"That lotus-eyed Rama on his entering the vast of Dandaka forest eliminated the demon Viraadha, and indeed descried Sage Sharabhanga, also even Sage Suteekhsna, also Sage Agastya and likewise Sage Agastya'...",
+        "citation": "Valmiki Ramayana",
+        "section": "Bala Kanda"
+      },
+      {
+        "id": "admin-doc-8e78f7002ece-5",
+        "text": "flaring fire, for it alone is auspicious... Then that woeful king of monkeys Sugreeva woefully informed Rama about his saga of feud with his brother Vali in reply to Rama's query, in friendship and in its entirety... Then Rama solemnly promised Sugre...",
+        "citation": "Valmiki Ramayana",
+        "section": "Bala Kanda"
+      }
+    ],
+    "Sundara Kanda": [
+      {
+        "id": "admin-doc-22e973e35e64-195",
+        "text": "those who had horrible appearances; bhugnavaktramshca = those with twisted mouths; vikaTaan = those who were horrific; tadhaa = and also; vaamanaan = short people; dhanvinaH = those who carried bows and arrows; khaDginashcaiva = those who carried swo...",
+        "citation": "Valmiki Ramayana",
+        "section": "Sundara Kanda"
+      },
+      {
+        "id": "admin-doc-22e973e35e64-856",
+        "text": "= from Vindhya mountain; sampraaptaaH = reached; uttaram antam = the northern shore; saagarasya = of the ocean. \"The monkeys were very much delighted and satisfied. They were making up their energy to see you, rose up from Vindhya mountain and reache...",
+        "citation": "Valmiki Ramayana",
+        "section": "Sundara Kanda"
+      },
+      {
+        "id": "admin-doc-22e973e35e64-196",
+        "text": "who were neither tall nor short; naatigauraan = those who were not very fair; naatikR^ishhNaan = those who were not very dark; naatikubjaan = those who were not very hunchbacked; na vaamanaan = those who were not very short; viruupaan = those who had...",
+        "citation": "Valmiki Ramayana",
+        "section": "Sundara Kanda"
+      },
+      {
+        "id": "admin-doc-22e973e35e64-857",
+        "text": "of bow, is safe. Lakshmana, who is engaged in the service of his elder brother and possessing good characteristics, is also safe.\" Verse Locator tasya v\u00c4\u00abryavato devi bhartu\u00e1\u00b8\u00a5 tava hite rata\u00e1\u00b8\u00a5 | aham eka\u00e1\u00b8\u00a5 tu sampr\u00c4\u0081pta\u00e1\u00b8\u00a5 sugr\u00c4\u00abva vacan\u00c4\u0081t iha ||...",
+        "citation": "Valmiki Ramayana",
+        "section": "Sundara Kanda"
+      },
+      {
+        "id": "admin-doc-22e973e35e64-1428",
+        "text": "tala \u00c4\u0081kr\u00c4\u0081nt\u00c4\u0081 ramye\u00e1\u00b9\u00a3u giri s\u00c4\u0081nu\u00e1\u00b9\u00a3u | sagho\u00e1\u00b9\u00a3\u00c4\u0081\u00e1\u00b8\u00a5 sama\u00c5\u009b\u00c4\u00abryanta \u00c5\u009bil\u00c4\u0081\u00e1\u00b8\u00a5 c\u00c5\u00abr\u00e1\u00b9\u0087\u00c4\u00ab k\u00e1\u00b9\u009bt\u00c4\u0081\u00e1\u00b8\u00a5 tata\u00e1\u00b8\u00a5 || 5-56-22 22. tataH = then; shilaaH = the rocks; ramyeSugirisaanusu = in the charming table-land of the mountain; tena paada talaakraantaa...",
+        "citation": "Valmiki Ramayana",
+        "section": "Sundara Kanda"
+      }
+    ]
+  }
+}

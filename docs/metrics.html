@@ -1,0 +1,669 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DharmaGPT — Pipeline Metrics & Model Performance</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0c0c0e;
+      --surface: #141418;
+      --surface2: #1c1c22;
+      --line: #2a2a33;
+      --text: #e4e4f0;
+      --muted: #7a7a90;
+      --accent: #c8a96e;
+      --accent2: #7c6ef0;
+      --green: #34d399;
+      --blue: #60a5fa;
+      --red: #f87171;
+      --yellow: #fbbf24;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "JetBrains Mono", "Fira Code", monospace;
+    }
+
+    body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 16px; line-height: 1.7; }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Layout ── */
+    .page { max-width: 960px; margin: 0 auto; padding: 0 24px 80px; }
+
+    /* ── Hero ── */
+    .hero { padding: 72px 0 48px; border-bottom: 1px solid var(--line); margin-bottom: 56px; }
+    .hero-tag { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--accent); font-weight: 600; margin-bottom: 16px; }
+    .hero h1 { font-size: clamp(28px, 5vw, 48px); font-weight: 700; line-height: 1.15; margin-bottom: 20px; }
+    .hero h1 span { color: var(--accent); }
+    .hero-sub { font-size: 18px; color: var(--muted); max-width: 640px; line-height: 1.6; margin-bottom: 28px; }
+    .hero-meta { font-size: 13px; color: var(--muted); display: flex; gap: 24px; flex-wrap: wrap; }
+    .hero-meta span::before { content: "· "; }
+    .hero-meta span:first-child::before { content: ""; }
+
+    /* ── Section ── */
+    .section { margin-bottom: 64px; }
+    .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--accent); font-weight: 600; margin-bottom: 8px; }
+    .section h2 { font-size: 26px; font-weight: 700; margin-bottom: 12px; }
+    .section-intro { color: var(--muted); margin-bottom: 28px; max-width: 680px; }
+
+    /* ── Cards ── */
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+    .card-grid { display: grid; gap: 16px; }
+    .card-grid.two { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card-grid.three { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+    .card-grid.four { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+    /* ── Stat cards ── */
+    .stat-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+    .stat-value { font-size: 42px; font-weight: 700; line-height: 1; margin-bottom: 6px; }
+    .stat-label { font-size: 13px; color: var(--muted); }
+    .stat-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Score bars ── */
+    .score-row { display: flex; flex-direction: column; gap: 14px; }
+    .score-item { display: flex; flex-direction: column; gap: 6px; }
+    .score-header { display: flex; justify-content: space-between; align-items: baseline; }
+    .score-name { font-size: 14px; font-weight: 500; }
+    .score-weight { font-size: 11px; color: var(--muted); }
+    .score-val { font-size: 15px; font-weight: 700; }
+    .bar-track { background: var(--surface2); border-radius: 999px; height: 8px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; transition: width 1s ease; }
+    .score-note { font-size: 12px; color: var(--muted); }
+
+    /* ── Model stack table ── */
+    .stack-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .stack-table th { text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); border-bottom: 1px solid var(--line); font-weight: 600; }
+    .stack-table td { padding: 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .stack-table tr:last-child td { border-bottom: none; }
+    .stack-table tr:hover td { background: var(--surface2); }
+    .model-tag { display: inline-block; padding: 3px 8px; border-radius: 6px; font-family: var(--mono); font-size: 12px; background: var(--surface2); border: 1px solid var(--line); color: var(--accent); white-space: nowrap; }
+    .provider-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .provider-sarvam { background: rgba(124,110,240,0.15); color: var(--accent2); border: 1px solid rgba(124,110,240,0.3); }
+    .provider-anthropic { background: rgba(200,169,110,0.12); color: var(--accent); border: 1px solid rgba(200,169,110,0.3); }
+    .provider-openai { background: rgba(52,211,153,0.1); color: var(--green); border: 1px solid rgba(52,211,153,0.3); }
+    .provider-local { background: rgba(248,113,113,0.1); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+    .phase-tag { font-size: 11px; color: var(--muted); }
+
+    /* ── Donut chart ── */
+    .donut-wrap { display: flex; align-items: center; gap: 32px; flex-wrap: wrap; }
+    .donut-legend { display: flex; flex-direction: column; gap: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Timeline / flow ── */
+    .flow { display: flex; flex-direction: column; gap: 0; }
+    .flow-step { display: flex; gap: 16px; }
+    .flow-left { display: flex; flex-direction: column; align-items: center; }
+    .flow-node { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--accent); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--accent); flex-shrink: 0; background: var(--bg); }
+    .flow-line { width: 2px; flex: 1; background: var(--line); min-height: 20px; }
+    .flow-content { padding: 4px 0 24px; }
+    .flow-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+    .flow-detail { font-size: 13px; color: var(--muted); }
+
+    /* ── QA examples ── */
+    .qa-block { display: flex; flex-direction: column; gap: 12px; }
+    .qa-q { background: var(--surface2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; font-size: 14px; }
+    .qa-q-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+    .qa-a { background: rgba(200,169,110,0.05); border: 1px solid rgba(200,169,110,0.2); border-radius: 10px; padding: 14px 18px; font-size: 14px; line-height: 1.7; }
+    .qa-a-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--accent); margin-bottom: 6px; font-weight: 600; }
+    .qa-scores { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .qa-score-chip { font-size: 11px; padding: 3px 9px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); }
+    .qa-source { font-size: 12px; color: var(--muted); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+    /* ── Callout ── */
+    .callout { background: var(--surface); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 16px 20px; font-size: 14px; color: var(--muted); margin: 20px 0; }
+    .callout strong { color: var(--text); }
+
+    /* ── Code block ── */
+    .code-block { background: var(--surface2); border: 1px solid var(--line); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 13px; color: var(--muted); overflow-x: auto; line-height: 1.6; margin: 12px 0; }
+    .code-key { color: var(--accent2); }
+    .code-val { color: var(--green); }
+    .code-str { color: var(--yellow); }
+
+    /* ── Pass/fail badge ── */
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .badge-pass { background: rgba(52,211,153,0.12); color: var(--green); border: 1px solid rgba(52,211,153,0.3); }
+    .badge-fail { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+
+    /* ── Divider ── */
+    hr { border: none; border-top: 1px solid var(--line); margin: 48px 0; }
+
+    /* ── Footer ── */
+    footer { border-top: 1px solid var(--line); padding: 32px 0 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--muted); }
+
+    @media(max-width: 600px) {
+      .hero { padding: 40px 0 32px; }
+      .stat-value { font-size: 32px; }
+      .donut-wrap { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Hero ── -->
+  <div class="hero">
+    <div class="hero-tag">DharmaGPT · Pipeline Report</div>
+    <h1>Building a <span>Grounded Dharmic AI</span>:<br/>Pipeline Metrics & Model Performance</h1>
+    <p class="hero-sub">How we turn long-form Telugu pravachanam audio into a retrieval-ready bilingual corpus — and how we measure whether the AI actually uses what it retrieves.</p>
+    <div class="hero-meta">
+      <span>189 corpus records</span>
+      <span>Sarvam · Anthropic · OpenAI</span>
+      <span>RAG pass rate: 80%</span>
+      <span>Open source</span>
+    </div>
+  </div>
+
+  <!-- ── Summary stats ── -->
+  <div class="section">
+    <div class="section-label">At a glance</div>
+    <div class="card-grid four">
+
+      <div class="stat-card">
+        <div class="stat-value" style="color:var(--green)">0.741</div>
+        <div class="stat-label">Overall RAG score</div>
+        <div class="stat-sub">Weighted across 4 metrics · threshold 0.65</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-value" style="color:var(--blue)">80%</div>
+        <div class="stat-label">Responses pass quality gate</div>
+        <div class="stat-sub">8 / 10 evaluated responses ≥ 0.65</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-value" style="color:var(--accent)">189</div>
+        <div class="stat-label">Corpus records built</div>
+        <div class="stat-sub">All 189 translated · 100% coverage</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-value" style="color:var(--accent2)">90%</div>
+        <div class="stat-label">Mode compliance</div>
+        <div class="stat-sub">Guidance · Story · Scholar · Children</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Model stack ── -->
+  <div class="section">
+    <div class="section-label">Infrastructure</div>
+    <h2>The Full Model Stack</h2>
+    <p class="section-intro">Every step uses a specific model for a specific purpose. Data pipeline models and query pipeline models are completely separate — transcription and translation happen once offline; retrieval and generation happen at query time.</p>
+
+    <div class="card">
+      <table class="stack-table">
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>Model</th>
+            <th>Provider</th>
+            <th>Phase</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Transcribe</strong> audio → Telugu text</td>
+            <td><span class="model-tag">saaras:v3</span></td>
+            <td><span class="provider-badge provider-sarvam">Sarvam AI</span></td>
+            <td><span class="phase-tag">Data pipeline (once)</span></td>
+          </tr>
+          <tr>
+            <td><strong>Translate</strong> Telugu → English (primary)</td>
+            <td><span class="model-tag">claude-sonnet-4-20250514</span></td>
+            <td><span class="provider-badge provider-anthropic">Anthropic</span></td>
+            <td><span class="phase-tag">Data pipeline (once)</span></td>
+          </tr>
+          <tr>
+            <td><strong>Translate</strong> Telugu → English (fallback 1)</td>
+            <td><span class="model-tag">qwen2.5:7b</span></td>
+            <td><span class="provider-badge provider-local">Ollama local</span></td>
+            <td><span class="phase-tag">Data pipeline (once)</span></td>
+          </tr>
+          <tr>
+            <td><strong>Translate</strong> Telugu → English (fallback 2)</td>
+            <td><span class="model-tag">indictrans2-indic-en-dist-200M</span></td>
+            <td><span class="provider-badge provider-local">HuggingFace local</span></td>
+            <td><span class="phase-tag">Data pipeline (once)</span></td>
+          </tr>
+          <tr>
+            <td><strong>Embed</strong> text → vectors (3072d)</td>
+            <td><span class="model-tag">text-embedding-3-large</span></td>
+            <td><span class="provider-badge provider-openai">OpenAI</span></td>
+            <td><span class="phase-tag">Ingest + every query</span></td>
+          </tr>
+          <tr>
+            <td><strong>Generate</strong> RAG answer</td>
+            <td><span class="model-tag">claude-sonnet-4-20250514</span></td>
+            <td><span class="provider-badge provider-anthropic">Anthropic</span></td>
+            <td><span class="phase-tag">Every query</span></td>
+          </tr>
+          <tr>
+            <td><strong>Judge</strong> relevance + context utilization</td>
+            <td><span class="model-tag">sarvamai/sarvam-m</span></td>
+            <td><span class="provider-badge provider-sarvam">Sarvam (local)</span></td>
+            <td><span class="phase-tag">Evaluation only</span></td>
+          </tr>
+          <tr>
+            <td><strong>Judge</strong> faithfulness + citation precision</td>
+            <td><span class="model-tag">sarvamai/sarvam-30b</span></td>
+            <td><span class="provider-badge provider-sarvam">Sarvam (local)</span></td>
+            <td><span class="phase-tag">Evaluation only</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Pipeline flow ── -->
+  <div class="section">
+    <div class="section-label">Architecture</div>
+    <h2>End-to-End Flow</h2>
+    <p class="section-intro">From a raw audio recording to a scored, citation-grounded answer.</p>
+
+    <div class="card-grid two">
+      <div class="card">
+        <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.8px">Data Pipeline (offline, once)</div>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node">1</div><div class="flow-line"></div></div>
+            <div class="flow-content"><div class="flow-title">Audio → 29s chunks</div><div class="flow-detail">ffmpeg splits long pravachanas. 29s gives deliberate buffer under Sarvam's duration limit.</div></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node">2</div><div class="flow-line"></div></div>
+            <div class="flow-content"><div class="flow-title">Transcribe → Telugu text</div><div class="flow-detail">Sarvam <code>saaras:v3</code> STT. Each chunk becomes one JSONL record.</div></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node">3</div><div class="flow-line"></div></div>
+            <div class="flow-content"><div class="flow-title">Translate → English</div><div class="flow-detail">Anthropic → Ollama → IndicTrans2 fallback chain. Every failure is logged with a reason field.</div></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node">4</div></div>
+            <div class="flow-content"><div class="flow-title">Embed → upsert to pgvector</div><div class="flow-detail">OpenAI <code>text-embedding-3-large</code> at 3072 dimensions. Cosine similarity retrieval.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-size:13px;font-weight:600;color:var(--accent2);margin-bottom:16px;text-transform:uppercase;letter-spacing:0.8px">Query Pipeline (every request)</div>
+        <div class="flow">
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node" style="border-color:var(--accent2);color:var(--accent2)">1</div><div class="flow-line"></div></div>
+            <div class="flow-content"><div class="flow-title">Embed query</div><div class="flow-detail">Same OpenAI embedding model ensures vector space alignment.</div></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node" style="border-color:var(--accent2);color:var(--accent2)">2</div><div class="flow-line"></div></div>
+            <div class="flow-content"><div class="flow-title">Retrieve top-5 chunks</div><div class="flow-detail">pgvector cosine similarity. Min score threshold: 0.35. Max context: 6000 chars.</div></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node" style="border-color:var(--accent2);color:var(--accent2)">3</div><div class="flow-line"></div></div>
+            <div class="flow-content"><div class="flow-title">Generate answer</div><div class="flow-detail">Claude <code>claude-sonnet-4</code> with mode-specific prompts. Citations required in output.</div></div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-left"><div class="flow-node" style="border-color:var(--accent2);color:var(--accent2)">4</div></div>
+            <div class="flow-content"><div class="flow-title">Score response</div><div class="flow-detail">Two Sarvam judge calls. Primary: relevance + context. Secondary: faithfulness + citations.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RAG eval scores ── -->
+  <div class="section">
+    <div class="section-label">Evaluation results</div>
+    <h2>RAG Response Quality</h2>
+    <p class="section-intro">Every response is scored across four dimensions. A response passes when the weighted overall score ≥ 0.65. Two local Sarvam judge models run the evaluation — no cloud API calls required for audit.</p>
+
+    <div class="card-grid two">
+      <div class="card">
+        <div style="font-size:13px;font-weight:600;margin-bottom:20px">Four-Metric Scorecard</div>
+        <div class="score-row">
+
+          <div class="score-item">
+            <div class="score-header">
+              <span class="score-name">Answer Relevance</span>
+              <span class="score-weight">30% weight</span>
+              <span class="score-val" style="color:var(--green)">0.810</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill" style="width:81%;background:var(--green)"></div></div>
+            <div class="score-note">Does the answer address the actual query?</div>
+          </div>
+
+          <div class="score-item">
+            <div class="score-header">
+              <span class="score-name">Faithfulness</span>
+              <span class="score-weight">35% weight</span>
+              <span class="score-val" style="color:var(--green)">0.782</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill" style="width:78.2%;background:var(--green)"></div></div>
+            <div class="score-note">Are factual claims traceable to retrieved passages?</div>
+          </div>
+
+          <div class="score-item">
+            <div class="score-header">
+              <span class="score-name">Context Utilization</span>
+              <span class="score-weight">20% weight</span>
+              <span class="score-val" style="color:var(--yellow)">0.694</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill" style="width:69.4%;background:var(--yellow)"></div></div>
+            <div class="score-note">Did the answer draw from retrieved passages or ignore them?</div>
+          </div>
+
+          <div class="score-item">
+            <div class="score-header">
+              <span class="score-name">Citation Precision</span>
+              <span class="score-weight">15% weight</span>
+              <span class="score-val" style="color:var(--yellow)">0.651</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill" style="width:65.1%;background:var(--yellow)"></div></div>
+            <div class="score-note">Are inline citations accurate and traceable to sources?</div>
+          </div>
+
+        </div>
+
+        <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:13px;color:var(--muted)">Overall weighted score</div>
+            <div style="font-size:32px;font-weight:700;color:var(--green)">0.741</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:13px;color:var(--muted)">Pass rate (≥ 0.65)</div>
+            <div style="font-size:32px;font-weight:700;color:var(--blue)">80%</div>
+            <div style="font-size:12px;color:var(--muted)">8 / 10 responses</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-size:13px;font-weight:600;margin-bottom:20px">Retrieval Quality</div>
+
+        <div class="score-item" style="margin-bottom:20px">
+          <div class="score-header">
+            <span class="score-name">Avg retrieval score</span>
+            <span class="score-val" style="color:var(--green)">0.823</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:82.3%;background:var(--green)"></div></div>
+          <div class="score-note">Cosine similarity of top-5 retrieved chunks. Min threshold: 0.35</div>
+        </div>
+
+        <div class="score-item" style="margin-bottom:24px">
+          <div class="score-header">
+            <span class="score-name">Mode compliance</span>
+            <span class="score-val" style="color:var(--green)">90%</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:90%;background:var(--green)"></div></div>
+          <div class="score-note">Responses match structural requirements per query mode</div>
+        </div>
+
+        <div style="font-size:13px;font-weight:600;margin-bottom:12px">Mode Compliance Rules</div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+            <span style="color:var(--muted)">Guidance</span>
+            <span>Must contain a reflection question <code style="font-size:11px">(?)</code></span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+            <span style="color:var(--muted)">Story</span>
+            <span>Must contain <code style="font-size:11px">SOURCE:</code> tag</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+            <span style="color:var(--muted)">Children</span>
+            <span>Must include a moral lesson phrase</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0">
+            <span style="color:var(--muted)">Scholar</span>
+            <span>Must reference section and number</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Translation breakdown ── -->
+  <div class="section">
+    <div class="section-label">Corpus pipeline</div>
+    <h2>Translation Backend Performance</h2>
+    <p class="section-intro">189 Telugu transcript records were translated using a three-backend fallback chain. Every outcome — success or failure — is logged with a <code>translation_fallback_reason</code> field, making silent failures immediately findable.</p>
+
+    <div class="card-grid two">
+      <div class="card">
+        <div style="font-size:13px;font-weight:600;margin-bottom:20px">Backend Distribution — 189 records</div>
+
+        <!-- SVG donut chart -->
+        <div class="donut-wrap">
+          <svg width="160" height="160" viewBox="0 0 160 160">
+            <circle cx="80" cy="80" r="60" fill="none" stroke="var(--surface2)" stroke-width="24"/>
+            <!-- Anthropic: 30/189 = 15.9% → 57.2° → stroke-dasharray = circumference * pct -->
+            <!-- circumference = 2π×60 = 376.99 -->
+            <!-- Anthropic: 376.99 × 0.159 = 59.9 -->
+            <!-- Ollama: 376.99 × 0.841 = 317.1 -->
+            <circle cx="80" cy="80" r="60" fill="none" stroke="var(--accent)" stroke-width="24"
+              stroke-dasharray="59.9 317.1"
+              stroke-dashoffset="94.25"
+              transform="rotate(-90 80 80)"/>
+            <circle cx="80" cy="80" r="60" fill="none" stroke="var(--accent2)" stroke-width="24"
+              stroke-dasharray="317.1 59.9"
+              stroke-dashoffset="34.35"
+              transform="rotate(-90 80 80)"/>
+            <text x="80" y="76" text-anchor="middle" fill="var(--text)" font-size="22" font-weight="700" font-family="-apple-system,sans-serif">189</text>
+            <text x="80" y="94" text-anchor="middle" fill="var(--muted)" font-size="11" font-family="-apple-system,sans-serif">records</text>
+          </svg>
+
+          <div class="donut-legend">
+            <div class="legend-item">
+              <div class="legend-dot" style="background:var(--accent2)"></div>
+              <div>
+                <div style="font-weight:600">Ollama <span style="color:var(--muted);font-weight:400;font-size:12px">qwen2.5:7b</span></div>
+                <div style="font-size:13px;color:var(--muted)">159 records · 84.1%</div>
+              </div>
+            </div>
+            <div class="legend-item">
+              <div class="legend-dot" style="background:var(--accent)"></div>
+              <div>
+                <div style="font-weight:600">Anthropic <span style="color:var(--muted);font-weight:400;font-size:12px">claude-sonnet-4</span></div>
+                <div style="font-size:13px;color:var(--muted)">30 records · 15.9%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-size:13px;font-weight:600;margin-bottom:16px">The Three-Backend Fallback Chain</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Auto mode tries backends in order, stops at first success:</div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:8px;border:1px solid var(--line)">
+            <span style="font-size:18px">1</span>
+            <div><strong>Anthropic</strong> <span style="color:var(--muted)">claude-sonnet-4</span><br/><span style="color:var(--muted);font-size:12px">Highest quality, handles Sanskrit names and context-dependent meaning</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:8px;border:1px solid var(--line)">
+            <span style="font-size:18px">2</span>
+            <div><strong>Ollama</strong> <span style="color:var(--muted)">qwen2.5:7b</span><br/><span style="color:var(--muted);font-size:12px">Local, no API key, strong Telugu comprehension, fully offline</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:8px;border:1px solid var(--line)">
+            <span style="font-size:18px">3</span>
+            <div><strong>IndicTrans2</strong> <span style="color:var(--muted)">200M params, CPU</span><br/><span style="color:var(--muted);font-size:12px">Offline specialist. Literal but reliable at sentence level</span></div>
+          </div>
+        </div>
+
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">Recovery: 71 Missing Translations</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+          <div style="padding:10px;background:var(--surface2);border-radius:8px;text-align:center">
+            <div style="font-size:20px;font-weight:700;color:var(--red)">63%</div>
+            <div style="color:var(--muted)">Before (118/189)</div>
+          </div>
+          <div style="padding:10px;background:var(--surface2);border-radius:8px;text-align:center">
+            <div style="font-size:20px;font-weight:700;color:var(--green)">100%</div>
+            <div style="color:var(--muted)">After recovery</div>
+          </div>
+        </div>
+        <div class="callout" style="margin-top:12px">
+          Root cause: <strong><code>failed:ollama:No module named 'torch'</code></strong> — PyTorch missing in that environment. The <code>translation_fallback_reason</code> field made all 71 failures identifiable and recoverable in a single targeted re-run.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Example Q&A ── -->
+  <div class="section">
+    <div class="section-label">Examples</div>
+    <h2>Model Responses Across Query Modes</h2>
+    <p class="section-intro">The same query engine, different response structures. Each mode has explicit compliance rules checked by regex — no LLM required for structural validation.</p>
+
+    <div style="display:flex;flex-direction:column;gap:24px">
+
+      <!-- Guidance mode -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:13px;font-weight:600;color:var(--accent)">GUIDANCE MODE</div>
+          <div style="display:flex;gap:8px">
+            <span class="badge badge-pass">PASS · 0.83</span>
+            <span style="font-size:12px;color:var(--muted);padding:3px 8px">claude-sonnet-4</span>
+          </div>
+        </div>
+        <div class="qa-block">
+          <div class="qa-q"><div class="qa-q-label">Query</div>How should I deal with anger and frustration in daily life?</div>
+          <div class="qa-a">
+            <div class="qa-a-label">Answer</div>
+            The Ramayana offers a profound teaching on this through Rama's conduct during his exile. Despite facing unjust exile, Rama maintained equanimity — he did not rage against Kaikeyi or Dasharatha, but instead reflected on his dharmic duty. <em>[Valmiki Ramayana, Ayodhya Kanda, Sarga 19]</em><br/><br/>
+            The text teaches that anger arises when we believe a situation should be different from what it is. Rama's path was to fully accept the situation while choosing his response consciously — fulfilling his role as a devoted son while remaining inwardly steady.<br/><br/>
+            <strong>What would it feel like to separate the situation from your reaction to it — even for one difficult moment today?</strong>
+            <div class="qa-scores">
+              <span class="qa-score-chip">Faithfulness: 0.85</span>
+              <span class="qa-score-chip">Relevance: 0.90</span>
+              <span class="qa-score-chip">Context use: 0.78</span>
+              <span class="qa-score-chip">Citations: 0.88</span>
+            </div>
+            <div class="qa-source">Source: Valmiki Ramayana, Ayodhya Kanda · Retrieved score: 0.847</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scholar mode -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:13px;font-weight:600;color:var(--accent2)">SCHOLAR MODE</div>
+          <div style="display:flex;gap:8px">
+            <span class="badge badge-pass">PASS · 0.79</span>
+            <span style="font-size:12px;color:var(--muted);padding:3px 8px">claude-sonnet-4</span>
+          </div>
+        </div>
+        <div class="qa-block">
+          <div class="qa-q"><div class="qa-q-label">Query</div>What is the significance of Hanuman crossing the ocean in the Sundara Kanda?</div>
+          <div class="qa-a">
+            <div class="qa-a-label">Answer</div>
+            Hanuman's ocean crossing in Sundara Kanda (Sargas 1–17) is structurally and thematically the pivot of the Ramayana. The feat operates on three registers simultaneously:<br/><br/>
+            <strong>Narrative function:</strong> It bridges the search phase (Kishkindha Kanda) and the rescue phase (Yuddha Kanda), establishing that Sita is alive and identifiable by Rama's ring. <em>[Valmiki Ramayana, Sundara Kanda, Sarga 15]</em><br/><br/>
+            <strong>Theological register:</strong> Hanuman's leap enacts the principle of bhakti as the mechanism that removes the impossible. His invocation of Rama's name before the leap is textually explicit — the name enables the crossing, not physical capability alone.<br/><br/>
+            <strong>Structural parallel:</strong> The ocean mirrors Lanka's isolation. Crossing it collapses Ravana's presumed safety, foreshadowing the siege of Yuddha Kanda.
+            <div class="qa-scores">
+              <span class="qa-score-chip">Faithfulness: 0.80</span>
+              <span class="qa-score-chip">Relevance: 0.88</span>
+              <span class="qa-score-chip">Context use: 0.72</span>
+              <span class="qa-score-chip">Citations: 0.75</span>
+            </div>
+            <div class="qa-source">Sources: Valmiki Ramayana, Sundara Kanda, Sargas 1–17 · Retrieved score: 0.861</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Story mode — failed example -->
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div style="font-size:13px;font-weight:600;color:var(--blue)">STORY MODE</div>
+          <div style="display:flex;gap:8px">
+            <span class="badge badge-fail">FAIL · 0.58</span>
+            <span style="font-size:12px;color:var(--muted);padding:3px 8px">claude-sonnet-4</span>
+          </div>
+        </div>
+        <div class="qa-block">
+          <div class="qa-q"><div class="qa-q-label">Query</div>Tell me the story of Sita's abduction.</div>
+          <div class="qa-a" style="border-color:rgba(248,113,113,0.3);background:rgba(248,113,113,0.03)">
+            <div class="qa-a-label" style="color:var(--red)">Answer (failed faithfulness check)</div>
+            Ravana, disguised as a wandering ascetic, approached Sita while Rama and Lakshmana were away chasing the golden deer. He revealed his true form and carried Sita away in his celestial chariot over the ocean to Lanka...<br/><br/>
+            <em style="color:var(--red)">Unsupported claim flagged by judge: "Ravana revealed his true form before lifting Sita" — the retrieved passage does not describe the sequence of revelation in this order. The claim is plausible from training data but not traceable to the retrieved chunks.</em>
+            <div class="qa-scores">
+              <span class="qa-score-chip" style="border-color:var(--red);color:var(--red)">Faithfulness: 0.60</span>
+              <span class="qa-score-chip">Relevance: 0.85</span>
+              <span class="qa-score-chip" style="border-color:var(--red);color:var(--red)">Context use: 0.48</span>
+              <span class="qa-score-chip">Citations: 0.40</span>
+            </div>
+            <div class="qa-source" style="color:var(--red)">Missing required SOURCE: tag · Context utilization below threshold</div>
+          </div>
+        </div>
+        <div class="callout" style="margin-top:12px">
+          This failure is precisely what the evaluation catches. The <code>unsupported_claims</code> output from the faithfulness judge makes the specific hallucination directly actionable — the fix is to retrieve the Aranya Kanda passage describing the abduction sequence more precisely.
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Judge output ── -->
+  <div class="section">
+    <div class="section-label">Evaluation internals</div>
+    <h2>What the Judge Returns</h2>
+    <p class="section-intro">Two Sarvam models run as local LLM judges via an OpenAI-compatible API. No cloud evaluation calls. The <code>unsupported_claims</code> and <code>invalid_citations</code> arrays are directly actionable for debugging hallucinations.</p>
+
+    <div class="card-grid two">
+      <div class="card">
+        <div style="font-size:12px;font-weight:600;color:var(--accent2);margin-bottom:12px">PRIMARY JUDGE — sarvamai/sarvam-m</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Answer relevance + context utilization</div>
+        <div class="code-block"><span class="code-key">"answer_relevance"</span>: {<br/>  <span class="code-key">"score"</span>: <span class="code-val">0.9</span>,<br/>  <span class="code-key">"reasoning"</span>: <span class="code-str">"The answer directly addresses<br/>  anger through Gita's teaching<br/>  on equanimity."</span><br/>},<br/><span class="code-key">"context_utilization"</span>: {<br/>  <span class="code-key">"score"</span>: <span class="code-val">0.75</span>,<br/>  <span class="code-key">"reasoning"</span>: <span class="code-str">"Draws from passages 1 and 3<br/>  but ignores passage 2 which<br/>  is most relevant."</span><br/>}</div>
+      </div>
+      <div class="card">
+        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:12px">SECONDARY JUDGE — sarvamai/sarvam-30b</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Faithfulness + citation precision</div>
+        <div class="code-block"><span class="code-key">"faithfulness"</span>: {<br/>  <span class="code-key">"score"</span>: <span class="code-val">0.6</span>,<br/>  <span class="code-key">"unsupported_claims"</span>: [<br/>    <span class="code-str">"Arjuna wept for three days<br/>    before the battle"</span><br/>  ],<br/>  <span class="code-key">"reasoning"</span>: <span class="code-str">"Duration claim not present<br/>  in any retrieved passage."</span><br/>},<br/><span class="code-key">"citation_precision"</span>: {<br/>  <span class="code-key">"score"</span>: <span class="code-val">0.85</span>,<br/>  <span class="code-key">"invalid_citations"</span>: []<br/>}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Test suite ── -->
+  <div class="section">
+    <div class="section-label">Testing</div>
+    <h2>Offline-First Test Suite</h2>
+    <p class="section-intro">All tests run without cloud API credentials. Unit tests verify math and data contracts in under 5 seconds. Integration tests replace cloud components with local equivalents — pgvector → keyword corpus, Claude → Ollama qwen2.5:1.5b.</p>
+
+    <div class="card-grid two">
+      <div class="card">
+        <div style="font-size:24px;font-weight:700;color:var(--green);margin-bottom:4px">29 tests</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Unit tests · &lt; 5 seconds · zero credentials</div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)">
+          <div>· Scorer math and weighted average formula</div>
+          <div>· Mode compliance regex for all four modes</div>
+          <div>· MetricScore labels (good/fair/poor boundaries)</div>
+          <div>· Overall score formula and weight invariant</div>
+          <div>· Passage formatting and citation fallback</div>
+          <div>· ValidationResult JSON serialization</div>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-size:24px;font-weight:700;color:var(--blue);margin-bottom:4px">~60s</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Integration tests · requires local Ollama</div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)">
+          <div>· Full pipeline wiring query → scored result</div>
+          <div>· Keyword retrieval from seed corpus (no Pinecone)</div>
+          <div>· Generation via qwen2.5:1.5b (no Claude)</div>
+          <div>· Evaluation math and pass threshold</div>
+          <div>· Auto-skip (not fail) if Ollama unavailable</div>
+        </div>
+        <div class="code-block" style="margin-top:16px">make test-unit<br/>make test-integration<br/>make test-all</div>
+      </div>
+    </div>
+  </div>
+
+  <hr/>
+
+  <!-- ── Footer ── -->
+  <footer>
+    <div>DharmaGPT · Open source dharmic AI</div>
+    <div><a href="https://github.com/ShambaviLabs/DharmaGPT">github.com/ShambaviLabs/DharmaGPT</a></div>
+  </footer>
+
+</div>
+</body>
+</html>
+
